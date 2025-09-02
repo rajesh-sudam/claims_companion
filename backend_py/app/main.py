@@ -1,5 +1,3 @@
-"""Entry point for the FastAPI/Socket.IO ASGI application."""
-
 from __future__ import annotations
 import os
 import logging
@@ -42,7 +40,7 @@ def on_startup():
 # Open CORS wide for dev
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["http://localhost:8080"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
 def on_startup():

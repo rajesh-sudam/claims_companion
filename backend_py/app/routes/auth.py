@@ -1,3 +1,4 @@
+
 """Authentication routes.
 
 These endpoints handle user registration, login and retrieval of
@@ -7,15 +8,14 @@ added easily if desired.
 """
 from __future__ import annotations
 import os
-print("=== LOADING Auth MODULE ===")
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-from typing import Optional
-from ..models import User, UserRole
+from typing import Optional, Set
+
+from ..models import User, UserRole, Session
 from ..db import get_db
-from passlib.hash import bcrypt
 from ..auth_utils import hash_password, verify_password, create_access_token, decode_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -35,34 +35,58 @@ class LoginRequest(BaseModel):
     password: str
 
 
-# ----- Helpers -----
-def _get_user_from_token(authorization: str | None, db: Session) -> User:
+# ----- Helpers / Dependencies -----
+
+def get_current_active_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+    """Dependency to get the current user, ensuring the token is valid and active."""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing token")
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    
     token = authorization.split(" ", 1)[1]
+    
+    # Check if session is active in the database
+    db_session = db.query(Session).filter(Session.token == token).first()
+    if not db_session or db_session.expires_at < datetime.now(datetime.timezone.utc):
+        if db_session: # Expired session
+            db.delete(db_session)
+            db.commit()
+        raise HTTPException(status_code=401, detail="Session expired or invalid, please log in again")
+
     payload = decode_access_token(token)
-    uid = int(payload.get("sub", 0))
-    user = db.query(User).filter(User.id == uid).first()
+    user_id = int(payload.get("sub", 0))
+    if user_id == 0:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="User not found for token")
+    
     return user
 
+def require_active_user_with_roles(required_roles: Set[UserRole]):
+    """Dependency factory to protect routes based on user roles."""
+    def _dependency(current_user: User = Depends(get_current_active_user)) -> User:
+        if current_user.role not in required_roles:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this resource.")
+        return current_user
+    return _dependency
+
 def _seed_employees(db: Session):
-    """Create default manager/analyst if not present."""
+    """Create default admin/agent if not present."""
     defaults = [
         {
-            "email": os.getenv("EMP_MANAGER_EMAIL", "manager@cc.io"),
-            "password": os.getenv("EMP_MANAGER_PASSWORD", "manager123"),
-            "role": UserRole.manager,
-            "first_name": "Claims",
-            "last_name": "Manager",
+            "email": os.getenv("EMP_ADMIN_EMAIL", "admin@cc.io"),
+            "password": os.getenv("EMP_ADMIN_PASSWORD", "admin123"),
+            "role": UserRole.admin,
+            "first_name": "App",
+            "last_name": "Admin",
         },
         {
-            "email": os.getenv("EMP_ANALYST_EMAIL", "analyst@cc.io"),
-            "password": os.getenv("EMP_ANALYST_PASSWORD", "analyst123"),
-            "role": UserRole.analyst,
+            "email": os.getenv("EMP_AGENT_EMAIL", "agent@cc.io"),
+            "password": os.getenv("EMP_AGENT_PASSWORD", "agent123"),
+            "role": UserRole.agent,
             "first_name": "Claims",
-            "last_name": "Analyst",
+            "last_name": "Agent",
         },
     ]
     for d in defaults:
@@ -70,7 +94,7 @@ def _seed_employees(db: Session):
         if not existing:
             user = User(
                 email=d["email"],
-                password=bcrypt.hash(d["password"]),
+                password=hash_password(d["password"]),
                 first_name=d["first_name"],
                 last_name=d["last_name"],
                 role=d["role"],
@@ -88,11 +112,7 @@ def seed_employees(db: Session = Depends(get_db)):
 
 @router.post("/register")
 def register_user(body: RegisterRequest, db: Session = Depends(get_db)):
-    """Create a new user and return a token.
-
-    If the email is already registered, a 400 error is returned. On
-    success the password is hashed and a JWT is issued.
-    """
+    """Create a new user. Does not automatically log them in."""
     existing = db.query(User).filter(User.email == body.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -102,53 +122,59 @@ def register_user(body: RegisterRequest, db: Session = Depends(get_db)):
         first_name=body.first_name,
         last_name=body.last_name,
         phone=body.phone,
+        role=UserRole.user # Explicitly set role to user
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    token = create_access_token({"sub": str(user.id), "email": user.email})
-    return {"user": {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name, "phone": user.phone}, "token": token}
+    return {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name, "phone": user.phone}
 
 
 @router.post("/login")
-def login_user(body: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate a user and return a token and user details."""
+def login_user(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    """Authenticate a user, create a session, and return a token."""
     user = db.query(User).filter(User.email == body.email).first()
     if not user or not verify_password(body.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_access_token({"sub": str(user.id), "email": user.email})
-    return {"user": {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name, "phone": user.phone}, "token": token}
+
+    # Token expires in 1 day
+    expires_delta = timedelta(days=1)
+    expires_at = datetime.utcnow() + expires_delta
+    
+    token_data = {"sub": str(user.id), "email": user.email, "role": user.role.value}
+    token = create_access_token(token_data, expires_delta)
+
+    # Create a new session in the database
+    new_session = Session(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at,
+        user_agent=request.headers.get("User-Agent")
+    )
+    db.add(new_session)
+    db.commit()
+
+    return {"user": {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name, "phone": user.phone, "role": user.role.value}, "token": token}
+
+
+@router.post("/logout")
+def logout_user(response: Response, authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
+    """Invalidate the current user's session by deleting the token."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ", 1)[1]
+
+    db_session = db.query(Session).filter(Session.token == token).first()
+    if db_session:
+        db.delete(db_session)
+        db.commit()
+    
+    response.status_code = 204 # No Content
+    return response
 
 
 @router.get("/me")
-def get_me(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    """Return the currently authenticated user's information.
-
-    Requires a valid Authorization header with a Bearer token. If
-    valid, the user is looked up by ID and returned; otherwise a 401
-    error is raised.
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing token")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_access_token(token)
-    user_id = int(payload.get("sub"))
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return {"user": {"id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name, "phone": user.phone}}
-
-
-# Utility you can reuse to protect admin-only endpoints
-def require_roles(*allowed_roles: UserRole):
-    def _dep(authorization: str | None = Header(default=None)):
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing token")
-        token = authorization.split(" ", 1)[1]
-        payload = decode_access_token(token)
-        role = payload.get("role")
-        if role not in {r.value if isinstance(r, UserRole) else r for r in allowed_roles}:
-            raise HTTPException(status_code=403, detail="Forbidden")
-        return payload
-    return _dep
+def get_me(current_user: User = Depends(get_current_active_user)):
+    """Return the currently authenticated user's information."""
+    return {"user": {"id": current_user.id, "email": current_user.email, "first_name": current_user.first_name, "last_name": current_user.last_name, "phone": current_user.phone, "role": current_user.role.value}}

@@ -1,86 +1,61 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import api from '@/utils/api';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 
-interface User {
-  id: number;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-}
-
-interface AuthContextValue {
-  user: User | null;
-  token: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (data: {
-    email: string;
-    password: string;
-    first_name?: string;
-    last_name?: string;
-    phone?: string;
-  }) => Promise<void>;
+interface AuthContextType {
+  isAuthenticated: boolean;
+  user: { id: string; email: string; first_name?: string; last_name?: string; phone?: string; role: string } | null;
+  login: (email: string, token: string, userId: string, role: string) => void;
   logout: () => void;
-  isLoading: boolean;
+  isLoading: boolean; // Added loading state
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+export const AuthProvider = ({ children }: { ReactNode }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [user, setUser] = useState<AuthContextType['user'] | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true); // Initialize as true
 
   useEffect(() => {
-    // Load token from localStorage
-    const savedToken = localStorage.getItem('claims_token');
-    const savedUser = localStorage.getItem('claims_user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
+    const token = localStorage.getItem('jwt_token');
+    const storedEmail = localStorage.getItem('email');
+    const storedUserId = localStorage.getItem('userId');
+    const storedUserRole = localStorage.getItem('userRole');
+    if (token && storedEmail && storedUserId && storedUserRole) {
+      setIsAuthenticated(true);
+      setUser({ id: storedUserId, email: storedEmail, role: storedUserRole });
+      console.log('AuthContext: Initializing user state from localStorage with role:', storedUserRole);
     }
-    setIsLoading(false);
+    setIsLoading(false); // Set to false after initialization
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const response = await api.post('/auth/login', { email, password });
-    const { user, token } = response.data;
-    setToken(token);
-    setUser(user);
-    localStorage.setItem('claims_token', token);
-    localStorage.setItem('claims_user', JSON.stringify(user));
-  };
-
-  const register = async (data: {
-    email: string;
-    password: string;
-    first_name?: string;
-    last_name?: string;
-    phone?: string;
-  }) => {
-    const response = await api.post('/auth/register', data);
-    const { user, token } = response.data;
-    setToken(token);
-    setUser(user);
-    localStorage.setItem('claims_token', token);
-    localStorage.setItem('claims_user', JSON.stringify(user));
+  const login = (email: string, token: string, userId: string, role: string) => {
+    localStorage.setItem('jwt_token', token);
+    localStorage.setItem('email', email);
+    localStorage.setItem('userId', userId);
+    localStorage.setItem('userRole', role);
+    setIsAuthenticated(true);
+    setUser({ id: userId, email: email, role: role });
+    console.log('User logged in:', email);
   };
 
   const logout = () => {
-    setToken(null);
+    localStorage.removeItem('jwt_token');
+    localStorage.removeItem('email');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('userRole');
+    setIsAuthenticated(false);
     setUser(null);
-    localStorage.removeItem('claims_token');
-    localStorage.removeItem('claims_user');
+    console.log('User logged out');
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, isLoading }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, login, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = (): AuthContextValue => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');

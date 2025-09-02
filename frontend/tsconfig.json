@@ -16,8 +16,9 @@
     "incremental": true,
     "baseUrl": "./",
     "paths": {
-      "@/*": ["src/*"]
-    }
+      "@/*": ["*"]
+    },
+    "ignoreDeprecations": "6.0"
   },
   "include": ["next-env.d.ts", "src/**/*.{ts,tsx,js,jsx}"],
   "exclude": ["node_modules"]

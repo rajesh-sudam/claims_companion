@@ -1,0 +1,45 @@
+# Dockerfile for Development
+
+# 1. Base Image
+FROM python:3.11-slim
+
+# 2. Environment Variables for Python and Hugging Face
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/home/app/.cache/huggingface
+
+# 3. Install system dependencies needed for Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 4. Create a non-root user for security
+RUN addgroup --system app && adduser --system --group app
+
+# 5. Set working directory
+WORKDIR /home/app
+
+# 6. Create and set permissions for cache and uploads directories
+# This is done before copying code and installing dependencies
+RUN mkdir -p ${HF_HOME} && \
+    chown -R app:app /home/app/.cache && \
+    mkdir uploads && \
+    chown app:app uploads
+
+# 7. Install Python dependencies (optimized for layer caching)
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# 8. Copy application code into the container
+COPY --chown=app:app ./app ./app
+
+# 9. Switch to the non-root user
+USER app
+
+# 10. Expose the port the app runs on
+EXPOSE 4000
+
+# 11. Command to run the app with auto-reload for development
+CMD ["uvicorn", "app.main:asgi_app", "--host", "0.0.0.0", "--port", "4000", "--reload"]
