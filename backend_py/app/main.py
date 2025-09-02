@@ -1,28 +1,28 @@
 """Entry point for the FastAPI/Socket.IO ASGI application."""
 
 from __future__ import annotations
-
+import os
 import logging
 import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from .db import Base, engine, SessionLocal, wait_for_db
 
-
-
-
-# Import engine/Base and the DB wait helper
-from .db import Base, engine, wait_for_db
-
+from .models import User, UserRole
+from .auth_utils import hash_password
 # Import models so SQLAlchemy knows about all tables before create_all()
 # (lint: F401 unused import on purpose)
 from . import models  # noqa: F401
-
 from .sockets import sio
-from .routes import auth, claims, chat
+from .routes import auth, claims, chat, admin
+from .routes.auth import _seed_employees  # reuse the helper
+import socketio
 
 log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="ClaimsCompanion API (Python)")
+
 
 
 @app.on_event("startup")
@@ -45,10 +45,30 @@ app.add_middleware(
     allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
+def on_startup():
+    Base.metadata.create_all(bind=engine)
+
+    # Seed admins (idempotent)
+    with SessionLocal() as db:
+        seeds = [
+            (os.getenv("ADMIN_MANAGER_EMAIL"), os.getenv("ADMIN_MANAGER_PASSWORD"), UserRole.manager),
+            (os.getenv("ADMIN_ANALYST_EMAIL"), os.getenv("ADMIN_ANALYST_PASSWORD"), UserRole.analyst),
+        ]
+        for email, pwd, role in seeds:
+            if email and pwd and not db.query(User).filter(User.email == email).first():
+                db.add(User(email=email, password=hash_password(pwd), role=role))
+        db.commit()
+
+
+
 # Routes
-app.include_router(auth.router,   prefix="/api/auth",  tags=["auth"])
-app.include_router(claims.router, prefix="/api/claims", tags=["claims"])
-app.include_router(chat.router,   prefix="/api/chat",  tags=["chat"])
+app.include_router(auth.router,   prefix="/api",  tags=["auth"])
+app.include_router(claims.router, prefix="/api", tags=["claims"])
+app.include_router(chat.router,   prefix="/api",  tags=["chat"])
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+# app.include_router(chat.router,   prefix="/api/register")
+
 
 # Socket.IO + FastAPI combined ASGI app
 asgi_app = socketio.ASGIApp(sio, other_asgi_app=app)

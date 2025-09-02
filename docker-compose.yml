@@ -1,29 +1,31 @@
 services:
   db:
-    image: postgres:15
+    image: postgres:14
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: cc
-      POSTGRES_PASSWORD: cc
-      POSTGRES_DB: cc
+      POSTGRES_USER: claims_user
+      POSTGRES_PASSWORD: claims_password
+      POSTGRES_DB: claims_db
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cc -d cc"]
-      interval: 2s
+      test: ["CMD-SHELL", "pg_isready -U claims_user -d claims_db -h localhost -p 5432"]
+      interval: 10s
       timeout: 5s
-      retries: 30
+      retries: 5
 
   backend:
     build:
       context: ./backend_py
       dockerfile: Dockerfile
-    env_file:
-      - ./backend_py/.env
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - ./backend_py/.env
     ports:
       - "4000:4000"
 
@@ -31,12 +33,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    environment:
-      - NEXT_PUBLIC_API_BASE=http://localhost:4000
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000/api
+    restart: unless-stopped
     depends_on:
       - backend
     ports:
       - "8080:3000"
 
 volumes:
-  pgdata:
+  db_data:

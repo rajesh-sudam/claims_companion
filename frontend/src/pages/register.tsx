@@ -29,6 +29,13 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // Add validation for password
+    if (!form.password || form.password.trim().length < 6) {
+      setError('Password is required and must be at least 6 characters.');
+      return;
+    }
+
     setLoading(true);
     try {
       await register(form);

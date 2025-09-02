@@ -3,6 +3,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import api from '@/utils/api';
 import io from 'socket.io-client';
+import { ChangeEvent } from 'react';
+import LoginPage from '../login';
 
 interface ClaimDetail {
   id: number;
@@ -30,6 +32,8 @@ interface ChatMessage {
   message_type: string;
   message_text: string;
   created_at: string;
+  attachment_url?: string | null;   // new field for attachments
+  attachment_name?: string | null;
 }
 
 interface TypingEvent {
@@ -48,6 +52,8 @@ export default function ClaimDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [typing, setTyping] = useState<TypingEvent | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+
 
   // Fetch claim and progress
   useEffect(() => {
@@ -107,20 +113,21 @@ export default function ClaimDetailPage() {
   }, [id, socket]);
 
   const sendMessage = async () => {
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() && !file) return;
     try {
-      const res = await api.post(`/chat/${id}/messages`, {
-        message_text: newMessage,
-        message_type: 'user',
+      const formData = new FormData();
+      formData.append('message_text', newMessage);
+      if (file) {
+        formData.append('file', file);
+      }
+      const res = await api.post(`/chat/${id}/messages`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       const msg = res.data.message as ChatMessage;
       setMessages((prev) => [...prev, msg]);
-      // Emit via socket to server (optional)
-      if (socket) {
-        // message already emitted by server; no need to emit again
-      }
       setNewMessage('');
-    } catch (err: any) {
+      setFile(null);
+    } catch (err) {
       console.error(err);
     }
   };
@@ -133,16 +140,22 @@ export default function ClaimDetailPage() {
     }
   };
 
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFile(e.target.files[0]);
+    }
+  };
+
+
   if (loading) return <p className="p-6">Loading claim...</p>;
   if (error) return <p className="p-6 text-red-500">{error}</p>;
   if (!claim) return null;
 
   return (
-    <div className="min-h-screen p-6 space-y-6">
-      <button onClick={() => router.back()} className="text-blue-600 hover:underline">← Back</button>
+    <div className="min-h-screen p-6 space-y-6"> 
+    <button onClick={() => router.api(LoginPage)} className="text-blue-600 hover:underline">Logout</button>
       <h1 className="text-3xl font-bold">Claim {claim.claim_number}</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Claim summary */}
+      {/* Claim summary */}
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Summary</h2>
           <p><strong>Type:</strong> {claim.claim_type}</p>
@@ -170,24 +183,36 @@ export default function ClaimDetailPage() {
             ))
           }</ol>
         </div>
-      </div>
-      {/* Chat Section */}
+      {/* ... claim summary, progress */}
       <div className="bg-white p-4 rounded shadow max-w-2xl">
         <h2 className="text-xl font-semibold mb-2">Chat with Claims Assistant</h2>
         <div className="h-64 overflow-y-auto border border-gray-200 p-3 mb-3 rounded">
           {messages.map((msg) => (
             <div key={msg.id} className={`mb-2 flex ${msg.message_type === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`rounded px-3 py-2 max-w-xs ${msg.message_type === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
-                <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>
+                {msg.attachment_url ? (
+                  <div className="mb-2">
+                    {msg.attachment_url.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                      <img src={msg.attachment_url} alt={msg.attachment_name || 'attachment'} className="max-w-full rounded" />
+                    ) : (
+                      <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-700">
+                        {msg.attachment_name || 'View attachment'}
+                      </a>
+                    )}
+                  </div>
+                ) : null}
+                {msg.message_text && <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>}
                 <p className="text-xs text-gray-400 text-right">{new Date(msg.created_at).toLocaleTimeString()}</p>
               </div>
             </div>
           ))}
         </div>
         {typing && (
-          <p className="text-sm text-gray-500 mb-2">{typing.from === 'ai' ? 'Claims Assistant is typing...' : ''}</p>
+          <p className="text-sm text-gray-500 mb-2">
+            {typing.from === 'ai' ? 'Claims Assistant is typing...' : ''}
+          </p>
         )}
-        <div className="flex space-x-2">
+        <div className="flex space-x-2 items-center">
           <input
             type="text"
             value={newMessage}
@@ -201,6 +226,18 @@ export default function ClaimDetailPage() {
               }
             }}
           />
+          <input
+            type="file"
+            onChange={handleFileChange}
+            className="hidden"
+            id="chat-file-upload"
+          />
+          <label
+            htmlFor="chat-file-upload"
+            className="cursor-pointer px-3 py-2 bg-gray-100 rounded border border-gray-300 text-sm"
+          >
+            📎
+          </label>
           <button
             onClick={sendMessage}
             className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -208,6 +245,9 @@ export default function ClaimDetailPage() {
             Send
           </button>
         </div>
+        {file && (
+          <p className="text-xs text-gray-500 mt-1">Selected: {file.name}</p>
+        )}
         <button
           onClick={handleEscalate}
           className="mt-3 text-sm text-purple-600 underline"

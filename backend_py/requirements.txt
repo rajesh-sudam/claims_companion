@@ -1,63 +1,39 @@
-# FastAPI provides the web framework for building the API and supports
-# dependency injection and automatic OpenAPI generation.
-fastapi==0.111.0
+# Set PyTorch CPU extra index URL first
+--extra-index-url https://download.pytorch.org/whl/cpu
 
-# Uvicorn runs the ASGI application. We include optional extras for
-# production-ready workers and automatic reload support (via the standard
-# package) but in Docker we just run uvicorn directly.
-uvicorn[standard]==0.30.1
-
-# SQLAlchemy is used for ORM and database interactions. We stick with
-# version 2.x which introduces modern declarative base classes and improved
-# typing support.
-SQLAlchemy==2.0.31
-
-# Psycopg2-binary is the PostgreSQL driver. The binary build simplifies
-# installation. If you need to compile from source, install the libpq-dev
-# package in the Dockerfile.
-psycopg2-binary==2.9.9
-
-# Passlib with bcrypt support for secure password hashing.
-passlib[bcrypt]==1.7.4
-# Pin bcrypt to <4.1.0 to avoid compatibility issues with passlib 1.7.4
-bcrypt<4.1.0,>=4.0.1
-
-# PyJWT handles JSON Web Token encoding and decoding. We pin a stable
-# version that works with FastAPI and python 3.11.
-PyJWT==2.8.0
-
-# python-socketio is used to implement Socket.IO server functionality for
-# real‑time updates. The "asgi" extra installs dependencies required for
-# ASGI frameworks.
-python-socketio[asgi]==5.11.2
-
-# Requests is used by the AI service to call external APIs (e.g. OpenAI or
-# HuggingFace). It's lightweight and widely used.
-requests==2.32.3
-
-# Pydantic is brought in transitively by FastAPI, but we declare it here
-# explicitly for clarity and type checking.
+# Core framework
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
-SQLAlchemy==2.0.31
-psycopg2-binary==2.9.9
-passlib[bcrypt]==1.7.4
-bcrypt<4.1.0,>=4.0.1
-PyJWT==2.8.0
-python-socketio[asgi]==5.11.2
-requests==2.32.3
-python-multipart==0.0.9
-openai==1.35.7
-httpx==0.27.2
 pydantic==2.7.1
+python-multipart==0.0.9
+
+# Database
+SQLAlchemy==2.0.31
+psycopg2-binary==2.9.9
+
+# Authentication
+passlib[bcrypt]==1.7.4
+bcrypt<4.1.0,>=4.0.1
+PyJWT==2.8.0
+
+# Real-time communication
+python-socketio[asgi]==5.11.2
+
+# HTTP clients
+requests==2.32.3
+httpx==0.27.2
+
+# AI/ML packages
+openai==1.35.7
 numpy<2.0.0
 torch==2.2.2+cpu
 torchvision==0.17.2+cpu
 torchaudio==2.2.2+cpu
---extra-index-url https://download.pytorch.org/whl/cpu
 sentence-transformers==2.7.0
-PyPDF2==3.0.1
 faiss-cpu==1.8.0
+
+# Document processing
+PyPDF2==3.0.1
 pytesseract==0.3.10
 pdf2image==1.17.0
 Pillow==10.3.0

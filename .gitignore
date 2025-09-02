@@ -1,0 +1,106 @@
+# =============================================================================
+# General & OS-specific
+# =============================================================================
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*~
+*.swp
+
+# =============================================================================
+# Environment Variables
+# =============================================================================
+
+# Ignore all local environment files from all directories.
+# Use .env.example for templates, which should be committed.
+**/.env*
+!**/.env.example
+
+# =============================================================================
+# IDEs and Editors
+# =============================================================================
+
+# Visual Studio Code
+# Ignore user-specific settings, but keep shared project settings
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains (PyCharm, WebStorm, IntelliJ, etc.)
+.idea/
+
+# =============================================================================
+# Next.js / Node.js
+# =============================================================================
+
+# Dependency directories
+node_modules/
+
+# Build output
+.next/
+out/
+
+# Next.js cache
+.next/cache
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =============================================================================
+# Python / FastAPI
+# =============================================================================
+
+# Byte-compiled / optimized / C extensions
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# Test & coverage reports
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+
+# =============================================================================
+# Docker
+# =============================================================================
+
+# It's often better to use a .dockerignore file for build context.
+# However, you might want to ignore local override files from git.
+docker-compose.override.yml
+docker-compose.override.yaml

@@ -9,3 +9,4 @@ registered in ``app.main`` under a common path prefix.
 from . import auth  # noqa: F401
 from . import claims  # noqa: F401
 from . import chat  # noqa: F401
+from . import admin 

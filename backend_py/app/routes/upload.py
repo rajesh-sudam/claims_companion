@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import Document  # You need a Document model/table
+from ..models import ClaimDocument  # You need a Document model/table
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ async def upload_document(claim_id: int, file: UploadFile = File(...), db: Sessi
     with open(f"uploads/{filename}", "wb") as f:
         f.write(contents)
     # Save metadata to DB
-    doc = Document(
+    doc = ClaimDocument(
         claim_id=claim_id,
         filename=filename,
         content_type=file.content_type,

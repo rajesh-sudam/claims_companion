@@ -11,22 +11,43 @@ Docker to initialise the database.
 from __future__ import annotations
 
 from datetime import datetime, date
-from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey, func
+from sqlalchemy.orm import relationship,  Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.sql import func
+from sqlalchemy import Enum as SAEnum 
+from enum import Enum as PyEnum
+from typing import Optional
 
 from .db import Base
 
 
+
+summary = Column(Text, nullable=True)
+reviewer_note = Column(Text, nullable=True)
+
+class UserRole(str, PyEnum):
+    user = "user"
+    manager = "manager"
+    analyst = "analyst"
+    
+
 class User(Base):
     __tablename__ = "users"
 
-    id: int = Column(Integer, primary_key=True, index=True)
-    email: str = Column(String(255), unique=True, nullable=False, index=True)
-    password: str = Column(String(255), nullable=False)
-    phone: str | None = Column(String(20))
-    first_name: str | None = Column(String(100))
-    last_name: str | None = Column(String(100))
-    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password = Column(String(255), nullable=False)
+    first_name = Column(String(100))
+    last_name = Column(String(100))
+    phone = Column(String(10))
+    # Use SQLAlchemy Enum, give the DB type a stable name for Postgres
+    role = Column(
+        SAEnum(UserRole, name="user_role"),  # <-- this is the PG ENUM type name
+        nullable=False,
+        server_default=UserRole.user.value,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     claims = relationship("Claim", back_populates="user")
@@ -44,8 +65,8 @@ class Claim(Base):
     incident_date: date | None = Column(Date, nullable=True)
     incident_description: str | None = Column(Text, nullable=True)
     estimated_completion: date | None = Column(Date, nullable=True)
-    created_at: datetime = Column(DateTime, default=datetime.utcnow)
-    updated_at: datetime = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: datetime = Column(DateTime, default=datetime.now)
+    updated_at: datetime = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
     user = relationship("User", back_populates="claims")
@@ -64,7 +85,7 @@ class ClaimProgress(Base):
     status: str = Column(String(20), nullable=False)  # 'pending', 'active', 'completed'
     completed_at: datetime | None = Column(DateTime, nullable=True)
     description: str | None = Column(Text, nullable=True)
-    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    created_at: datetime = Column(DateTime, default=datetime.now)
 
     claim = relationship("Claim", back_populates="progress_steps")
 
@@ -78,7 +99,7 @@ class ClaimDocument(Base):
     file_url: str = Column(String(500), nullable=False)
     document_type: str | None = Column(String(100), nullable=True)
     status: str = Column(String(50), default="pending_review")
-    uploaded_at: datetime = Column(DateTime, default=datetime.utcnow)
+    uploaded_at: datetime = Column(DateTime, default=datetime.now)
 
     claim = relationship("Claim", back_populates="documents")
 
@@ -91,7 +112,8 @@ class ChatMessage(Base):
     user_id: int | None = Column(Integer, ForeignKey("users.id"), nullable=True)
     role: str = Column(String(20), nullable=False)  # 'user', 'ai', 'agent'
     message: str = Column(Text, nullable=False)
-    created_at: datetime = Column(DateTime, default=datetime.utcnow)
-
+    created_at: datetime = Column(DateTime, default=datetime.now)
+    attachment_url: str | None = Column(String(500), nullable=True)  # Add this
+    attachment_name: str | None = Column(String(255), nullable=True)  
     claim = relationship("Claim", back_populates="messages")
     user = relationship("User", back_populates="messages")
