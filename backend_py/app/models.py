@@ -66,8 +66,8 @@ class Claim(Base):
     incident_date: date | None = Column(Date, nullable=True)
     incident_description: str | None = Column(Text, nullable=True)
     estimated_completion: date | None = Column(Date, nullable=True)
-    created_at: datetime = Column(DateTime, default=datetime.now)
-    updated_at: datetime = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
     user = relationship("User", back_populates="claims")
@@ -100,7 +100,7 @@ class ClaimDocument(Base):
     file_url: str = Column(String(500), nullable=False)
     document_type: str | None = Column(String(100), nullable=True)
     status: str = Column(String(50), default="pending_review")
-    uploaded_at: datetime = Column(DateTime, default=datetime.now)
+    uploaded_at: datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     claim = relationship("Claim", back_populates="documents")
 
@@ -113,7 +113,7 @@ class ChatMessage(Base):
     user_id: int | None = Column(Integer, ForeignKey("users.id"), nullable=True)
     role: str = Column(String(20), nullable=False)
     message: str = Column(Text, nullable=False)
-    created_at: datetime = Column(DateTime, default=datetime.now)
+    created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
     attachment_url: str | None = Column(String(500), nullable=True)
     attachment_name: str | None = Column(String(255), nullable=True)
     

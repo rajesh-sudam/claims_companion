@@ -1,7 +1,7 @@
 import { useState, useEffect, ChangeEvent } from 'react';
 import { useRouter } from 'next/router';
-import { useAuth } from '@/contexts/AuthContext';
-import api from '@/utils/api';
+import { useAuth } from '../../contexts/AuthContext';
+import api from '../../utils/api';
 
 type ClaimType = 'motor' | 'health' | 'property' | 'travel';
 

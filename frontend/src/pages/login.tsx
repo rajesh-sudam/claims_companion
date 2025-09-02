@@ -31,9 +31,17 @@ const LoginPage = () => {
       });
 
       const { user, token } = response.data;
+      console.log('Logged in user:', user);
       
-      login(user.email, token, user.id);
-      router.push('/my-claims'); // Redirect to my-claims page after login
+      login(user.email, token, user.id, user.role);
+      console.log('User logged in blah blah:', user.role);
+      if (user.role === 'agent') {
+        setTimeout(() => {
+          router.push('/agent/agent-dashboard');
+        }, 100); // Small delay to ensure Next.js router is ready
+      } else {
+        router.push('/my-claims');
+      }
     } catch (err: any) {
       console.error('Login error:', err);
       setError(

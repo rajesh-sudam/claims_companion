@@ -2,7 +2,7 @@
 
 services:
   db:
-    image: postgres:14
+    image: postgres:15
     restart: unless-stopped
     env_file: ./.env # Use variables from .env file
     ports:

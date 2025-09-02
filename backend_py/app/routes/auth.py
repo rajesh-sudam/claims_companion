@@ -46,7 +46,7 @@ def get_current_active_user(authorization: str | None = Header(default=None), db
     
     # Check if session is active in the database
     db_session = db.query(Session).filter(Session.token == token).first()
-    if not db_session or db_session.expires_at < datetime.utcnow():
+    if not db_session or db_session.expires_at < datetime.now(datetime.timezone.utc):
         if db_session: # Expired session
             db.delete(db_session)
             db.commit()

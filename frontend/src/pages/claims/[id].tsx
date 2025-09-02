@@ -2,8 +2,8 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import io from 'socket.io-client';
 import { ChangeEvent } from 'react';
-import api from '@/utils/api';
-import { useAuth } from '@/contexts/AuthContext';
+import api from '../../utils/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface ClaimDetail {
   id: number;
