@@ -21,41 +21,54 @@ const AgentDashboard = () => {
   const [loadingClaims, setLoadingClaims] = useState<boolean>(true);
   const [claimsError, setClaimsError] = useState<string | null>(null);
 
-  console.log('AgentDashboard: isAuthenticated', isAuthenticated);
-  console.log('AgentDashboard: user role', user?.role);
-  console.log('AgentDashboard: isLoading', isLoading);
-
-  if (isLoading) {
-    return <p className="p-6">Loading authentication...</p>;
-  }
-
-  if (!isAuthenticated) {
-    router.push('/login');
-    return null;
-  }
-
-  if (user?.role !== 'agent') {
-    router.push('/my-claims');
-    return null;
-  }
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [isLoading, isAuthenticated, router]);
 
   useEffect(() => {
-    const fetchUnprocessedClaims = async () => {
-      setLoadingClaims(true);
-      setClaimsError(null);
-      try {
-        const response = await api.get('/admin/claims', { params: { status: 'pending' } });
-        setClaims(response.data.claims);
-      } catch (err: any) {
-        setClaimsError(err.response?.data?.detail || 'Failed to fetch unprocessed claims.');
-        console.error('Error fetching unprocessed claims:', err);
-      } finally {
-        setLoadingClaims(false);
-      }
-    };
+    if (user?.role && user.role !== 'agent') {
+      router.push('/my-claims');
+    }
+  }, [user, router]);
 
-    fetchUnprocessedClaims();
-  }, []);
+  useEffect(() => {
+    if (isAuthenticated && user?.role === 'agent') {
+      const fetchUnprocessedClaims = async () => {
+        setLoadingClaims(true);
+        setClaimsError(null);
+        try {
+          const response = await api.get('/admin/claims', { params: { status: 'pending_human_review' } });
+          setClaims(response.data.claims);
+        } catch (err: any) {
+          setClaimsError(err.response?.data?.detail || 'Failed to fetch unprocessed claims.');
+          console.error('Error fetching unprocessed claims:', err);
+        } finally {
+          setLoadingClaims(false);
+        }
+      };
+
+      fetchUnprocessedClaims();
+    }
+  }, [isAuthenticated, user]);
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending_human_review':
+        return 'bg-blue-100 text-blue-800';
+      case 'awaiting_documents':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'documents_under_review':
+        return 'bg-purple-100 text-purple-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  if (isLoading || !isAuthenticated || user?.role !== 'agent') {
+    return <p className="p-6">Loading...</p>;
+  }
 
   return (
     <div className="min-h-screen bg-background py-12 px-4 sm:px-6 lg:px-8">
@@ -108,18 +121,15 @@ const AgentDashboard = () => {
                       {claim.claim_type}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        claim.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800' // Default for other statuses
-                      }`}>
-                        {claim.status}
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(claim.status)}`}>
+                        {claim.status.replace(/_/g, ' ')}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                       {new Date(claim.incident_date).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <Link href={`/claims/${claim.id}`} className="text-primary hover:text-primary-dark">
+                      <Link href={`/agent/claims/${claim.id}`} className="text-primary hover:text-primary-dark">
                         View
                       </Link>
                     </td>

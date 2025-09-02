@@ -10,6 +10,8 @@ from ..db import get_db
 from ..models import Claim, ClaimProgress, User
 from ..auth_utils import decode_access_token
 from ..rag import analyse_claim_with_rag
+from .chat import initiate_document_request, send_human_review_message
+
 print("=== LOADING Claims MODULE ===")
 router = APIRouter(prefix="/claims", tags=["claims"])
 
@@ -52,6 +54,7 @@ async def create_claim(
         status="submitted",
         incident_date=incident_date,
         incident_description=incident_description,
+        uploaded_documents=[],
     )
     db.add(claim)
     db.commit()
@@ -67,17 +70,23 @@ async def create_claim(
             f.write(await file.read())
         saved_files.append(str(fpath))
     
+    claim.uploaded_documents = saved_files
+    db.commit()
+
     # Insert default progress step
     step = ClaimProgress(
         claim_id=claim.id,
         step_id="submitted",
         step_title="Claim Submitted",
         status="completed",
-        completed_at=datetime.now(),
+        completed_at=datetime.now(timezone.utc),
         description=f"Your claim has been received and assigned number {claim.claim_number}"
     )
     db.add(step)
     db.commit()
+    
+    # Initiate AI document request
+    await initiate_document_request(claim.id, db)
     
     # Run AI/RAG analysis
     try:
@@ -93,7 +102,7 @@ async def create_claim(
             step_id="ai_analysis",
             step_title="AI Validation",
             status="completed",
-            completed_at=datetime.now(),
+            completed_at=datetime.now(timezone.utc),
             description=f"AI Analysis: {analysis}"
         )
         db.add(ai_step)
@@ -105,7 +114,7 @@ async def create_claim(
             step_id="ai_analysis",
             step_title="AI Validation",
             status="failed",
-            completed_at=datetime.now(),
+            completed_at=datetime.now(timezone.utc),
             description=f"AI analysis failed: {str(e)}"
         )
         db.add(ai_step)
@@ -133,6 +142,25 @@ async def upload_documents(
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
     
+    # Mark documents_requested step as completed
+    db.query(ClaimProgress).filter(
+        ClaimProgress.claim_id == claim_id,
+        ClaimProgress.step_id == "documents_requested"
+    ).update({"status": "completed", "completed_at": datetime.now(timezone.utc)})
+
+    # Add documents_uploaded step
+    doc_uploaded_step = ClaimProgress(
+        claim_id=claim.id,
+        step_id="documents_uploaded",
+        step_title="Documents Uploaded",
+        status="completed",
+        completed_at=datetime.now(timezone.utc),
+        description=f"{len(files)} document(s) uploaded."
+    )
+    db.add(doc_uploaded_step)
+    claim.status = "documents_under_review"
+    db.commit()
+
     saved_files = []
     for file in files:
         ext = Path(file.filename).suffix
@@ -142,12 +170,19 @@ async def upload_documents(
             f.write(await file.read())
         saved_files.append(str(fpath))
     
+    # Add new file paths to the claim's uploaded_documents
+    if claim.uploaded_documents:
+        claim.uploaded_documents.extend(saved_files)
+    else:
+        claim.uploaded_documents = saved_files
+    db.commit()
+
     # Optionally re-run RAG validation on uploaded docs
     try:
         analysis = analyse_claim_with_rag(
             claim_type=claim.claim_type,
             description=claim.incident_description,
-            files=saved_files,
+            files=claim.uploaded_documents,
         )
         
         # Add document analysis progress step
@@ -156,11 +191,29 @@ async def upload_documents(
             step_id="ai_doc_analysis",
             step_title="AI Document Check",
             status="completed",
-            completed_at=datetime.now(),
+            completed_at=datetime.now(timezone.utc),
             description=f"AI found: {analysis}"
         )
         db.add(doc_step)
         db.commit()
+
+        # Send human review message and update status
+        await send_human_review_message(claim.id, db)
+        claim.status = "pending_human_review"
+        
+        # Add pending_human_review step
+        human_review_step = ClaimProgress(
+            claim_id=claim.id,
+            step_id="pending_human_review",
+            step_title="Pending Human Review",
+            status="active",
+            description="Your claim has been escalated to a human agent for final review.",
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(human_review_step)
+        db.commit()
+
+
     except Exception as e:
         # Log error but don't fail the upload
         print(f"Document analysis failed: {str(e)}")

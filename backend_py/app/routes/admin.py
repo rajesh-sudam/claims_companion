@@ -1,146 +1,126 @@
-
-from __future__ import annotations
-from typing import Optional, Literal, Set
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func, Date
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel
-
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from typing import List, Optional
 from ..db import get_db
-from ..models import User, UserRole, Claim, ChatMessage
-from ..routes.auth import require_active_user_with_roles
+from ..models import Claim, ChatMessage, UserRole, User, ClaimProgress
 from ..services.ai import summarize_claim_for_staff
+from ..auth_utils import require_active_user_with_roles
+
+class StatusUpdate(BaseModel):
+    status: str
 
 router = APIRouter()
 
-# Define role-based access dependencies
-can_process_claims = require_active_user_with_roles({UserRole.agent, UserRole.admin})
-can_view_analytics = require_active_user_with_roles({UserRole.data_analyst, UserRole.admin})
-is_admin = require_active_user_with_roles({UserRole.admin})
-
-@router.get("/test")
-def test_endpoint():
-    return {"message": "Admin router is working"}
-
 @router.get("/claims")
-def list_claims(
-    status: Optional[str] = Query(default=None),
-    page: int = 1,
-    page_size: int = 20,
+async def list_admin_claims(
+    status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(can_process_claims)
+    current_user: User = Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin})),
 ):
-    q = db.query(Claim)
+    query = db.query(Claim)
     if status:
-        q = q.filter(Claim.status == status)
-    total = q.count()
-    rows = (
-        q.order_by(Claim.created_at.desc())
-         .offset((page - 1) * page_size)
-         .limit(page_size)
-         .all()
-    )
-    data = [{
-        "id": c.id,
-        "claim_number": c.claim_number,
-        "status": c.status,
-        "claim_type": c.claim_type,
-        "created_at": c.created_at.isoformat(),
-        "user_id": c.user_id,
-    } for c in rows]
-    return {"total": total, "page": page, "page_size": page_size, "claims": data}
+        query = query.filter(Claim.status == status)
+    
+    claims = query.order_by(Claim.created_at.desc()).all()
+    
+    return {"claims": [
+        {
+            "id": c.id,
+            "claim_number": c.claim_number,
+            "claim_type": c.claim_type,
+            "status": c.status,
+            "incident_date": c.incident_date.isoformat() if c.incident_date else None,
+            "estimated_completion": c.estimated_completion.isoformat() if c.estimated_completion else None,
+        }
+        for c in claims
+    ]}
 
-@router.get("/claims/{claim_id}")
-async def get_claim(
-    claim_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(can_process_claims)
-):
-    c = db.query(Claim).filter(Claim.id == claim_id).first()
-    if not c:
+@router.get("/claims/{claim_id}/summary")
+async def get_claim_summary(claim_id: int, db: Session = Depends(get_db)):
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
-    
-    messages = db.query(ChatMessage).filter(ChatMessage.claim_id == claim_id).all()
-    ai_summary_data = await summarize_claim_for_staff(c, messages)
-    
+
+    messages = db.query(ChatMessage).filter(ChatMessage.claim_id == claim_id).order_by(ChatMessage.created_at.asc()).all()
+
+    summary = await summarize_claim_for_staff(claim, messages)
+    return summary
+
+@router.get("/claims/{claim_id}", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
+async def get_admin_claim(claim_id: int, db: Session = Depends(get_db)):
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
     return {
-        "id": c.id,
-        "claim_number": c.claim_number,
-        "status": c.status,
-        "claim_type": c.claim_type,
-        "incident_description": c.incident_description,
-        "created_at": c.created_at.isoformat(),
-        "user_id": c.user_id,
-        "ai_summary": ai_summary_data["summary"],
-        "risk_score": ai_summary_data["risk_score"],
-        "facts": ai_summary_data["facts"],
+        "claim": {
+            "id": claim.id,
+            "claim_number": claim.claim_number,
+            "claim_type": claim.claim_type,
+            "status": claim.status,
+            "incident_date": claim.incident_date.isoformat() if claim.incident_date else None,
+            "incident_description": claim.incident_description,
+            "estimated_completion": claim.estimated_completion.isoformat() if claim.estimated_completion else None,
+        }
     }
 
-class DecisionBody(BaseModel):
-    decision: Literal["approve", "reject", "needs_info"]
-    notes: Optional[str] = None
-
-@router.post("/claims/{claim_id}/decision")
-def decide_claim(
-    claim_id: int,
-    body: DecisionBody,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(can_process_claims)
-):
-    c = db.query(Claim).filter(Claim.id == claim_id).first()
-    if not c:
+@router.get("/claims/{claim_id}/progress", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
+async def get_admin_claim_progress(claim_id: int, db: Session = Depends(get_db)):
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
-    next_status = {
-        "approve": "approved",
-        "reject": "rejected",
-        "needs_info": "needs_info",
-    }[body.decision]
-    c.status = next_status
+
+    steps = db.query(ClaimProgress).filter(ClaimProgress.claim_id == claim_id).order_by(ClaimProgress.created_at).all()
+
+    progress_list = []
+    for step in steps:
+        progress_list.append({
+            "id": step.id,
+            "step_id": step.step_id,
+            "step_title": step.step_title,
+            "status": step.status,
+            "completed_at": step.completed_at.isoformat() if step.completed_at else None,
+            "description": step.description,
+        })
+    return {"progress": progress_list}
+
+@router.get("/chat/{claim_id}/history", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
+async def get_admin_chat_history(claim_id: int, db: Session = Depends(get_db)):
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    rows = db.execute(
+        text(
+            """
+            SELECT id, role, message, created_at
+            FROM chat_messages
+            WHERE claim_id = :cid
+            ORDER BY id
+            """
+        ),
+        {"cid": claim_id},
+    ).mappings().all()
+
+    history = []
+    for row in rows:
+        history.append(
+            {
+                "id": row["id"],
+                "message_type": row["role"],
+                "message_text": row["message"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            }
+        )
+    return {"history": history}
+
+@router.put("/claims/{claim_id}/status", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
+async def update_claim_status(claim_id: int, status_update: StatusUpdate, db: Session = Depends(get_db)):
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    claim.status = status_update.status
     db.commit()
-    return {"ok": True, "claim_id": c.id, "status": c.status}
-
-@router.get("/metrics")
-def metrics(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(can_view_analytics)
-):
-    total = db.query(func.count(Claim.id)).scalar() or 0
-    by_status = dict(db.query(Claim.status, func.count(Claim.id)).group_by(Claim.status))
-    return {"total": total, "by_status": by_status}
-
-@router.get("/analytics/claims-by-date")
-def claims_by_date(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(can_view_analytics)
-):
-    results = db.query(
-        func.date(Claim.created_at).label('date'),
-        func.count(Claim.id).label('count')
-    ).group_by(func.date(Claim.created_at)).all()
-    
-    return [{"date": str(r.date), "count": r.count} for r in results]
-
-@router.get("/users")
-def list_users(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(is_admin)
-):
-    users = db.query(User).all()
-    return [{"id": u.id, "email": u.email, "role": u.role.value, "created_at": u.created_at.isoformat()} for u in users]
-
-class RoleUpdate(BaseModel):
-    new_role: UserRole
-
-@router.put("/users/{user_id}/role")
-def update_user_role(
-    user_id: int,
-    body: RoleUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(is_admin)
-):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user.role = body.new_role
-    db.commit()
-    return {"ok": True, "user_id": user.id, "new_role": body.new_role.value}
+    return {"status": claim.status}

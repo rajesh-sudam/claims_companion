@@ -1,4 +1,3 @@
-
 """Helper functions for authentication and JWT handling.
 
 This module centralises password hashing and JSON Web Token operations.
@@ -11,12 +10,16 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import timedelta
-from typing import Any, Dict
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Set
 
 import jwt
 from passlib.context import CryptContext
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException, Header
+from sqlalchemy.orm import Session
+
+from .db import get_db
+from .models import User, UserRole, Session
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -67,3 +70,37 @@ def decode_access_token(token: str) -> Dict[str, Any]:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
     return payload
+
+def get_current_active_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+    """Dependency to get the current user, ensuring the token is valid and active."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    
+    token = authorization.split(" ", 1)[1]
+    
+    # Check if session is active in the database
+    db_session = db.query(Session).filter(Session.token == token).first()
+    if not db_session or db_session.expires_at < datetime.now(timezone.utc):
+        if db_session: # Expired session
+            db.delete(db_session)
+            db.commit()
+        raise HTTPException(status_code=401, detail="Session expired or invalid, please log in again")
+
+    payload = decode_access_token(token)
+    user_id = int(payload.get("sub", 0))
+    if user_id == 0:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found for token")
+    
+    return user
+
+def require_active_user_with_roles(required_roles: Set[UserRole]):
+    """Dependency factory to protect routes based on user roles."""
+    def _dependency(current_user: User = Depends(get_current_active_user)) -> User:
+        if current_user.role not in required_roles:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this resource.")
+        return current_user
+    return _dependency

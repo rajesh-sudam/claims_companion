@@ -7,17 +7,98 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Form, UploadFile,
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from datetime import datetime, timezone
 
 import os
 from ..db import get_db
-from ..models import ChatMessage, Claim
+from ..models import ChatMessage, Claim, ClaimProgress
 from ..auth_utils import decode_access_token
 from ..sockets import sio
 from ..services.ai import generate_ai_reply_rag, AIAnswer
-from ..rag import RAGService
+from ..rag import RAGService, get_rag_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-rag_service = RAGService()  # Load and index docs at startup
+
+async def initiate_document_request(claim_id: int, db: Session):
+    """Initiates a request for documents from the AI."""
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        return
+
+    claim_type_messages = {
+        "motor": "To process your motor claim, please upload photos of the damage, a copy of the police report, and any repair estimates you have.",
+        "health": "For your health claim, please upload your medical bills, receipts, and a copy of your doctor's report.",
+        "property": "For your property claim, please provide photos of the damage, a list of damaged items, and any receipts or proof of ownership.",
+        "travel": "To proceed with your travel claim, please upload your travel itinerary, receipts for any expenses, and any relevant documentation (e.g., flight cancellation notice).",
+    }
+
+    message_text = claim_type_messages.get(
+        claim.claim_type,
+        "To proceed with your claim, please upload the necessary documents. You can upload multiple files at once."
+    )
+
+    ai_chat = ChatMessage(
+        claim_id=claim_id,
+        user_id=None,
+        role="ai_request_documents",
+        message=message_text,
+    )
+    db.add(ai_chat)
+
+    # Add a progress step for "Documents Requested"
+    progress_step = ClaimProgress(
+        claim_id=claim_id,
+        step_id="documents_requested",
+        step_title="Documents Requested",
+        status="active",
+        description="The AI assistant has requested the necessary documents.",
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(progress_step)
+
+    claim.status = "awaiting_documents"
+
+    db.commit()
+    db.refresh(ai_chat)
+
+    room = str(claim_id)
+    await sio.emit(
+        "chat_message",
+        {
+            "id": ai_chat.id,
+            "claim_id": claim_id,
+            "message_type": "ai_request_documents",
+            "message_text": ai_chat.message,
+            "created_at": ai_chat.created_at.isoformat() if ai_chat.created_at else None,
+        },
+        to=room,
+    )
+
+async def send_human_review_message(claim_id: int, db: Session):
+    """Sends a message to the user informing them that their claim is under human review."""
+    message_text = "Thank you for submitting your documents. Your claim is now under review by a human agent. We will notify you of any updates."
+    ai_chat = ChatMessage(
+        claim_id=claim_id,
+        user_id=None,
+        role="ai",
+        message=message_text,
+    )
+    db.add(ai_chat)
+    db.commit()
+    db.refresh(ai_chat)
+
+    room = str(claim_id)
+    await sio.emit(
+        "chat_message",
+        {
+            "id": ai_chat.id,
+            "claim_id": claim_id,
+            "message_type": "ai",
+            "message_text": ai_chat.message,
+            "created_at": ai_chat.created_at.isoformat() if ai_chat.created_at else None,
+        },
+        to=room,
+    )
 
 
 def _get_user_id(authorization: str | None) -> int:
@@ -103,8 +184,7 @@ async def send_message(
         attachment_name = file.filename
         print(f"DEBUG CHAT: Saved file to: {storage_path}")
 
-    # Store user's message (first instance)
-    print("DEBUG CHAT: Storing user message (first instance)...")
+    # Store user's message
     user_chat = ChatMessage(
         claim_id=claim_id,
         user_id=user_id,
@@ -130,27 +210,6 @@ async def send_message(
     )
     print("DEBUG CHAT: Emitted user message via socket")
 
-    # NOTE: This appears to be duplicate message storage - you might want to remove this
-    print("DEBUG CHAT: WARNING - About to store duplicate user message")
-    print("DEBUG CHAT: This will fail because attachment_url/attachment_name columns don't exist")
-    try:
-        chat_msg = ChatMessage(
-            claim_id=claim_id,
-            user_id=user_id,
-            role="user",
-            message=message_text.strip(),
-            # attachment_url=attachment_url,      # These columns don't exist - commenting out
-            # attachment_name=attachment_name,    # These columns don't exist - commenting out
-        )
-        db.add(chat_msg)
-        db.commit()
-        db.refresh(chat_msg)
-        print(f"DEBUG CHAT: Stored duplicate user message with ID: {chat_msg.id}")
-    except Exception as e:
-        print(f"DEBUG CHAT: Failed to store duplicate message: {type(e).__name__}: {e}")
-        # Use the first user_chat message instead
-        chat_msg = user_chat
-
     # --- RAG retrieval with debug ---
     print(f"DEBUG RAG: ========== RAG Retrieval ==========")
     print(f"DEBUG RAG: User message: '{message_text}'")
@@ -158,6 +217,10 @@ async def send_message(
     print(f"DEBUG RAG: Claim ID: {claim_id}")
     
     try:
+        rag_service = get_rag_service()
+        if claim.uploaded_documents:
+            rag_service.add_documents(claim.uploaded_documents)
+
         print("DEBUG RAG: Calling rag_service.retrieve()...")
         context_chunks: List[Any] = rag_service.retrieve(message_text, top_k=3)
         print(f"DEBUG RAG: Retrieved {len(context_chunks)} chunks")

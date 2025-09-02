@@ -168,32 +168,27 @@ def _build_system_prompt(claim: Any, norm_context: List[Dict[str, Any]]) -> str:
         "You are a helpful insurance claims assistant for NovaWorks insurance.\n\n"
         
         "INSTRUCTIONS:\n"
-        "- Answer questions about the user's specific claim using the CLAIM INFORMATION below\n"
-        "- Answer policy questions using the POLICY CONTEXT below\n"
-        "- For greetings: Respond warmly as their claims assistant\n"
-        "- For unrelated questions: Politely redirect to claim/policy topics\n"
-        "- Be helpful and concise\n\n"
+        "- Your primary goal is to answer the user's questions based on the provided CONTEXT.\n"
+        "- The CONTEXT contains both information about the user's specific claim and excerpts from the policy documents.\n"
+        "- If the answer is in the CONTEXT, you must cite the source using the format [context-id].\n"
+        "- If the answer is not in the CONTEXT, politely state that you cannot find the information.\n"
+        "- For greetings: Respond warmly as their claims assistant.\n"
+        "- Be helpful and concise.\n\n"
         
-        f"CLAIM INFORMATION (use this to answer questions about their claim):\n"
-        f"- Claim number: {claim_number}\n"
-        f"- Claim type: {claim_type}\n"
-        f"- Status: {status}\n"
-        f"- Created: {created or 'unknown'}\n"
-        f"- Incident description: {desc or 'n/a'}\n\n"
-        
-        "POLICY CONTEXT (use this to answer coverage/policy questions):\n"
+        f"CONTEXT:\n"
+        f"Claim Number: {claim_number}\n"
+        f"Claim Type: {claim_type}\n"
+        f"Status: {status}\n"
+        f"Created: {created or 'unknown'}\n"
+        f"Incident Description: {desc or 'n/a'}\n\n"
+        f"Policy Information:\n"
         f"{context_str}\n\n"
-        
-        "EXAMPLES:\n"
-        "- 'What is my claim number?' → Answer: 'Your claim number is {claim_number}'\n"
-        "- 'Hi' → Answer: 'Hello! I'm your NovaWorks claims assistant. How can I help with your claim today?'\n"
-        "- 'What's covered?' → Use the policy context to explain coverage\n\n"
         
         "RESPONSE FORMAT - Always respond with valid JSON:\n"
         "{\n"
         '  "answer": "your response here",\n'
-        '  "citations": [{"id": "context-id"}] // only for policy context answers\n'
-        "}"
+        '  "citations": [{"id": "context-id"}] // only if you used the policy information\n'
+        "}\n"
     )
     
     print(f"DEBUG PROMPT: Final system prompt length: {len(prompt)}")

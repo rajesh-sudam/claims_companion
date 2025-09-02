@@ -1,14 +1,6 @@
-
-"""Authentication routes.
-
-These endpoints handle user registration, login and retrieval of
-current user information. Tokens are issued via JSON Web Tokens
-(JWT) and stored on the client. A cookie-based approach could be
-added easily if desired.
-"""
 from __future__ import annotations
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -16,11 +8,15 @@ from typing import Optional, Set
 
 from ..models import User, UserRole, Session
 from ..db import get_db
-from ..auth_utils import hash_password, verify_password, create_access_token, decode_access_token
+from ..auth_utils import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_active_user,
+    require_active_user_with_roles,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -34,42 +30,6 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
-
-# ----- Helpers / Dependencies -----
-
-def get_current_active_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
-    """Dependency to get the current user, ensuring the token is valid and active."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-    
-    token = authorization.split(" ", 1)[1]
-    
-    # Check if session is active in the database
-    db_session = db.query(Session).filter(Session.token == token).first()
-    if not db_session or db_session.expires_at < datetime.now(datetime.timezone.utc):
-        if db_session: # Expired session
-            db.delete(db_session)
-            db.commit()
-        raise HTTPException(status_code=401, detail="Session expired or invalid, please log in again")
-
-    payload = decode_access_token(token)
-    user_id = int(payload.get("sub", 0))
-    if user_id == 0:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found for token")
-    
-    return user
-
-def require_active_user_with_roles(required_roles: Set[UserRole]):
-    """Dependency factory to protect routes based on user roles."""
-    def _dependency(current_user: User = Depends(get_current_active_user)) -> User:
-        if current_user.role not in required_roles:
-            raise HTTPException(status_code=403, detail="You do not have permission to access this resource.")
-        return current_user
-    return _dependency
 
 def _seed_employees(db: Session):
     """Create default admin/agent if not present."""
@@ -140,7 +100,7 @@ def login_user(body: LoginRequest, request: Request, db: Session = Depends(get_d
 
     # Token expires in 1 day
     expires_delta = timedelta(days=1)
-    expires_at = datetime.utcnow() + expires_delta
+    expires_at = datetime.now(timezone.utc) + expires_delta
     
     token_data = {"sub": str(user.id), "email": user.email, "role": user.role.value}
     token = create_access_token(token_data, expires_delta)

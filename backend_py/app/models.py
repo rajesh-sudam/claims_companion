@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from datetime import datetime, date
@@ -6,9 +5,9 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey
 from sqlalchemy.orm import relationship,  Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
-from sqlalchemy import Enum as SAEnum 
+from sqlalchemy import Enum as SAEnum
 from enum import Enum as PyEnum
-from typing import Optional
+from typing import Optional, List
 
 from .db import Base
 
@@ -18,7 +17,7 @@ class UserRole(str, PyEnum):
     agent = "agent"
     data_analyst = "data_analyst"
     admin = "admin"
-    
+
 
 class User(Base):
     __tablename__ = "users"
@@ -68,6 +67,8 @@ class Claim(Base):
     estimated_completion: date | None = Column(Date, nullable=True)
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now())
     updated_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    uploaded_documents = Column(JSONB, nullable=True)
+
 
     # Relationships
     user = relationship("User", back_populates="claims")

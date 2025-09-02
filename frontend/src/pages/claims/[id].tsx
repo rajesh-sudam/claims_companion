@@ -86,7 +86,13 @@ export default function ClaimDetailPage() {
       s.emit('join_claim', id);
     });
     s.on('chat_message', (msg: ChatMessage) => {
-      setMessages((prev: ChatMessage[]) => [...prev, msg]);
+      setMessages((prev: ChatMessage[]) => {
+        // Avoid duplicating optimistic message
+        if (prev.find((m) => m.id === msg.id)) {
+          return prev;
+        }
+        return [...prev, msg];
+      });
       setTyping(null);
     });
     s.on('typing', (evt: TypingEvent) => {
@@ -106,21 +112,32 @@ export default function ClaimDetailPage() {
 
   const sendMessage = async () => {
     if (!newMessage.trim() && !file) return;
+
+    const userMessage: ChatMessage = {
+      id: Date.now(), // Temporary ID for optimistic update
+      message_type: 'user',
+      message_text: newMessage,
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setNewMessage('');
+    setFile(null);
+
     try {
       const formData = new FormData();
       formData.append('message_text', newMessage);
       if (file) {
         formData.append('file', file);
       }
-      const res = await api.post(`/chat/${id}/messages`, formData, {
+      await api.post(`/chat/${id}/messages`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const msg = res.data.message as ChatMessage;
-      setMessages((prev) => [...prev, msg]);
-      setNewMessage('');
-      setFile(null);
+      // The AI's response will be added via the socket event
     } catch (err) {
       console.error(err);
+      // Optionally, show an error message to the user and remove the optimistic message
+      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
     }
   };
 
@@ -132,9 +149,21 @@ export default function ClaimDetailPage() {
     }
   };
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+      // Automatically upload the file
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        await api.post(`/claims/${id}/documents`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        // The backend will emit a 'claim_updated' event, which will trigger a re-fetch of the progress
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
@@ -181,23 +210,39 @@ export default function ClaimDetailPage() {
           <h2 className="text-2xl font-semibold mb-4 text-text-secondary">Chat with Claims Assistant</h2>
           <div className="h-64 overflow-y-auto border border-gray-700 p-3 mb-3 rounded">
             {messages.map((msg) => (
-              <div key={msg.id} className={`mb-2 flex ${msg.message_type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`rounded px-3 py-2 max-w-xs ${msg.message_type === 'user' ? 'bg-primary text-white' : 'bg-gray-700 text-text-primary'}`}>
-                  {msg.attachment_url ? (
-                    <div className="mb-2">
-                      {msg.attachment_url.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                        <img src={msg.attachment_url} alt={msg.attachment_name || 'attachment'} className="max-w-full rounded" />
-                      ) : (
-                        <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-400">
-                          {msg.attachment_name || 'View attachment'}
-                        </a>
-                      )}
-                    </div>
-                  ) : null}
-                  {msg.message_text && <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>}
-                  <p className="text-xs text-gray-400 text-right">{new Date(msg.created_at).toLocaleTimeString()}</p>
-                </div>
-              </div>
+                            <div key={msg.id}>
+                            {msg.message_type === 'ai_request_documents' ? (
+                              <div className="flex justify-center my-4">
+                                <div className="bg-gray-700 text-text-primary rounded px-4 py-3 max-w-md text-center shadow-lg">
+                                  <p className="text-sm whitespace-pre-wrap mb-3">{msg.message_text}</p>
+                                  <label
+                                    htmlFor="chat-file-upload"
+                                    className="cursor-pointer mt-2 inline-block bg-primary text-text-primary px-4 py-2 rounded hover:bg-accent-hover font-semibold"
+                                  >
+                                    Upload Documents
+                                  </label>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className={`mb-2 flex ${msg.message_type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`rounded px-3 py-2 max-w-xs ${msg.message_type === 'user' ? 'bg-primary text-white' : 'bg-gray-700 text-text-primary'}`}>
+                                  {msg.attachment_url ? (
+                                    <div className="mb-2">
+                                      {msg.attachment_url.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                                        <img src={msg.attachment_url} alt={msg.attachment_name || 'attachment'} className="max-w-full rounded" />
+                                      ) : (
+                                        <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-400">
+                                          {msg.attachment_name || 'View attachment'}
+                                        </a>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                  {msg.message_text && <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>}
+                                  <p className="text-xs text-gray-400 text-right">{new Date(msg.created_at).toLocaleTimeString()}</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
             ))}
           </div>
           {typing && (

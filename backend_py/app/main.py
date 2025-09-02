@@ -21,15 +21,13 @@ log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="ClaimsCompanion API (Python)")
 
-
-
 @app.on_event("startup")
 def on_startup():
     # Wait until Postgres is accepting connections (handles container race)
     try:
         log.info("Waiting for database to be ready...")
         wait_for_db(max_tries=60, delay_seconds=1.0)
-        log.info("Database is ready. Creating tables if needed...")
+        log.info("Database is ready. Creating tables if they don't exist...")
         Base.metadata.create_all(bind=engine)
         log.info("Table creation complete.")
     except Exception as e:
@@ -37,20 +35,14 @@ def on_startup():
         log.exception("Startup failed while preparing the database: %s", e)
         raise
 
-# Open CORS wide for dev
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:8080"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
-)
-
-def on_startup():
-    Base.metadata.create_all(bind=engine)
-
-    # Seed admins (idempotent)
+    # Seed employees (idempotent)
     with SessionLocal() as db:
+        _seed_employees(db)
+        
+        # Seed other users from environment variables
         seeds = [
-            (os.getenv("ADMIN_MANAGER_EMAIL"), os.getenv("ADMIN_MANAGER_PASSWORD"), UserRole.manager),
-            (os.getenv("ADMIN_ANALYST_EMAIL"), os.getenv("ADMIN_ANALYST_PASSWORD"), UserRole.analyst),
+            (os.getenv("ADMIN_MANAGER_EMAIL"), os.getenv("ADMIN_MANAGER_PASSWORD"), UserRole.data_analyst),
+            (os.getenv("ADMIN_ANALYST_EMAIL"), os.getenv("ADMIN_ANALYST_PASSWORD"), UserRole.data_analyst),
         ]
         for email, pwd, role in seeds:
             if email and pwd and not db.query(User).filter(User.email == email).first():
@@ -58,6 +50,11 @@ def on_startup():
         db.commit()
 
 
+# Open CORS wide for dev
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8080", "http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+)
 
 # Routes
 app.include_router(auth.router,   prefix="/api",  tags=["auth"])
