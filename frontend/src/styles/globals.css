@@ -3,5 +3,65 @@
 @tailwind utilities;
 
 body {
-  @apply bg-gray-50 text-gray-900;
+  background-color: var(--color-background);
+  color: var(--color-text-secondary);
+}
+
+/* Custom scrollbar for Webkit browsers */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1A1C29;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #8A5EFF;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #A685FF;
+}
+
+/* Custom scrollbar for Firefox */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #8A5EFF #1A1C29;
+}
+
+/* Define custom Tailwind CSS colors */
+@layer base {
+  :root {
+    --color-primary: #8A5EFF; /* Purple */
+    --color-background: #0C0E1A; /* Dark Navy Background */
+    --color-surface: #1A1C29; /* Slightly lighter background for sections/cards */
+    --color-text-primary: #FFFFFF; /* Main white text */
+    --color-text-secondary: #F0F0F0; /* Subtle gray text */
+    --color-glassy-bg: rgba(26, 28, 41, 0.6); /* Semi-transparent surface */
+  }
+}
+
+@layer components {
+  .glassy-card {
+    background-color: var(--color-glassy-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .text-primary {
+    color: var(--color-primary);
+  }
+
+  /* Autofill background fix */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0px 1000px var(--color-surface) inset !important;
+    -webkit-text-fill-color: var(--color-text-secondary) !important;
+    background-color: var(--color-surface) !important; /* Fallback for non-webkit */
+  }
 }

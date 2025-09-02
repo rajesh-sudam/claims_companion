@@ -1,45 +1,74 @@
+# docker-compose.yml (Optimized for Development)
+
 services:
   db:
     image: postgres:14
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: claims_user
-      POSTGRES_PASSWORD: claims_password
-      POSTGRES_DB: claims_db
+    env_file: ./.env # Use variables from .env file
     ports:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U claims_user -d claims_db -h localhost -p 5432"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost -p 5432"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - claims-net
+
+  chroma:
+    image: chromadb/chroma
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - claims-net
 
   backend:
     build:
       context: ./backend_py
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev # Use development Dockerfile
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      chroma:
+        condition: service_started
     env_file:
       - ./backend_py/.env
+      - ./.env # Also give backend access to db credentials if needed
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
     ports:
       - "4000:4000"
+    volumes:
+      - ./backend_py/app:/home/app/app # Mount for hot-reloading
+    networks:
+      - claims-net
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:4000/api
+      dockerfile: Dockerfile.dev # Use development Dockerfile
     restart: unless-stopped
     depends_on:
       - backend
     ports:
       - "8080:3000"
+    volumes:
+      - ./frontend:/app # Mount for hot-reloading
+      - /app/node_modules # Preserve container's node_modules
+    networks:
+      - claims-net
 
 volumes:
   db_data:
+  chroma_data:
+
+networks:
+  claims-net:
+    driver: bridge

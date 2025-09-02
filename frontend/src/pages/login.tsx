@@ -1,113 +1,100 @@
-import { useState, useEffect } from "react";
-import { useRouter } from "next/router";
-import Link from "next/link";
-import { useAuth } from "@/contexts/AuthContext";
+import React, { useState } from 'react';
+import Head from 'next/head';
+import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/router';
 
-export default function LoginPage() {
-  const { user, login, isLoading } = useAuth();
+const LoginPage = () => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const { login } = useAuth();
   const router = useRouter();
 
-  const [email, setEmail] = useState<string>("");
-  const [password, setPassword] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (!isLoading && user) {
-      router.replace("/");
-    }
-  }, [user, isLoading, router]);
-
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      await login(email, password);
-      router.replace("/"); // user portal home
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.error ||
-        err?.message ||
-        "Login failed. Please check your credentials.";
-      setError(msg);
-    } finally {
-      setLoading(false);
+    // In a real application, you would send these credentials to your backend for authentication.
+    // For this example, we'll just simulate a successful login.
+    if (username && password) {
+      // Simulate receiving a JWT token from a backend
+      const dummyToken = `fake-jwt-token-for-${username}-${Date.now()}`;
+      login(username, dummyToken);
+      router.push('/my-claims'); // Redirect to my-claims page after login
+    } else {
+      alert('Please enter both username and password.');
     }
-  }
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white p-8 rounded-2xl shadow w-full max-w-md"
-      >
-        <h1 className="text-2xl font-semibold mb-2 text-center">
-          Login to ClaimsCompanion
-        </h1>
-        <p className="text-sm text-gray-500 mb-6 text-center">User portal</p>
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <Head>
+        <title>Login - CogniClaim</title>
+        <meta name="description" content="Login to your CogniClaim account." />
+      </Head>
 
-        {error && (
-          <div className="mb-4 rounded-md bg-red-50 p-3 text-red-700 text-sm">
-            {error}
+      <div className="max-w-md w-full space-y-8 glassy-card p-10 rounded-lg shadow-lg">
+        <div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-text-secondary">
+            Sign in to your account
+          </h2>
+        </div>
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div className="rounded-md shadow-sm -space-y-px">
+            <div>
+              <label htmlFor="username" className="sr-only">Username</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                autoComplete="username"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-600 placeholder-gray-500 text-base-100 bg-transparent focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
+                placeholder="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
+            <div className="pt-4">
+              <label htmlFor="password" className="sr-only">Password</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-600 placeholder-gray-500 text-base-100 bg-transparent focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
           </div>
-        )}
 
-        <label
-          htmlFor="email"
-          className="block text-sm font-medium text-gray-700 mb-1"
-        >
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full border border-gray-300 p-2 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          required
-        />
+          <div className="flex items-center justify-between">
+            <div className="text-sm">
+              <Link href="#" className="font-medium text-primary hover:text-primary-dark">
+                Forgot your password?
+              </Link>
+            </div>
+          </div>
 
-        <label
-          htmlFor="password"
-          className="block text-sm font-medium text-gray-700 mb-1"
-        >
-          Password
-        </label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full border border-gray-300 p-2 rounded-lg mb-6 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          required
-        />
-
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-60"
-          disabled={loading}
-        >
-          {loading ? "Signing in..." : "Sign In"}
-        </button>
-
-        <div className="mt-6 text-center text-sm text-gray-600">
-          Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-blue-600 hover:underline">
-            Register
+          <div>
+            <button
+              type="submit"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-text-primary bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+            >
+              Sign in
+            </button>
+          </div>
+        </form>
+        <div className="text-center text-sm text-gray-400">
+          Don't have an account? {' '}
+          <Link href="/signup" className="font-medium text-primary hover:text-primary-dark">
+            Sign up
           </Link>
         </div>
-
-        <div className="mt-3 text-center text-sm text-gray-600">
-          Employee?{" "}
-          <Link href="/employee/login" className="text-blue-600 hover:underline">
-            Go to Employee Login
-          </Link>
-        </div>
-      </form>
+      </div>
     </div>
   );
-}
+};
+
+export default LoginPage;

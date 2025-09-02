@@ -1,0 +1,32 @@
+# Dockerfile for Frontend (Development)
+
+# 1. Base Image
+FROM node:18-alpine
+
+# 2. Create a non-root user and group for security
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nextjs -u 1001
+
+# 3. Set working directory
+WORKDIR /app
+
+# 4. Copy dependency definitions
+COPY package*.json ./
+
+# 5. Install dependencies
+# This is run as root to have permissions to install
+RUN npm install
+
+# 6. Switch to the non-root user
+USER nextjs
+
+# 7. Copy the rest of the application code
+# Note: In a real dev setup, this directory will be overwritten by the volume mount,
+# but it's good practice to have the code in the image itself.
+COPY . .
+
+# 8. Expose the port for the Next.js dev server
+EXPOSE 3000
+
+# 9. Start the Next.js development server with hot-reloading
+CMD ["npm", "run", "dev"]

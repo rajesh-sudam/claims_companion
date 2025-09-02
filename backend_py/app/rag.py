@@ -3,20 +3,18 @@ import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
-import faiss
 import numpy as np
-import PyPDF2
 from pathlib import Path
 
 DOCUMENTS_DIR = os.path.join(os.path.dirname(__file__), "documents")
 
 class RAGService:
     def __init__(self):
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model = SentenceTransformer('all-MiniLM-L6-v2', token=False)
         self.docs = self._load_documents()
         self.embeddings = self.model.encode([doc['text'] for doc in self.docs])
-        self.index = faiss.IndexFlatL2(self.embeddings.shape[1])
-        self.index.add(np.array(self.embeddings))
+        # self.index = faiss.IndexFlatL2(self.embeddings.shape[1])
+        # self.index.add(np.array(self.embeddings))
     
     def _load_documents(self):
         docs = []
@@ -24,31 +22,32 @@ class RAGService:
             if filename.endswith(".pdf"):
                 path = os.path.join(DOCUMENTS_DIR, filename)
                 with open(path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
+                    # reader = PyPDF2.PdfReader(f)
                     text = ""
-                    for page in reader.pages:
-                        text += page.extract_text() or ""
-                    # Split into chunks (e.g., 2000 chars)
-                    chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
-                    for idx, chunk in enumerate(chunks):
-                        docs.append({
-                            "id": f"{filename}-{idx}", 
-                            "text": chunk,
-                            "doc_id": filename,
-                            "chunk_id": str(idx)
-                        })
+                    # for page in reader.pages:
+                    #     text += page.extract_text() or ""
+                    # # Split into chunks (e.g., 2000 chars)
+                    # chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
+                    # for idx, chunk in enumerate(chunks):
+                    #     docs.append({
+                    #         "id": f"{filename}-{idx}", 
+                    #         "text": chunk,
+                    #         "doc_id": filename,
+                    #         "chunk_id": str(idx)
+                    #     })
         return docs
     
     def retrieve(self, query, top_k=3):
         query_emb = self.model.encode([query])
-        D, I = self.index.search(np.array(query_emb), top_k)
-        results = []
-        for dist, idx in zip(D[0], I[0]):
-            if idx < len(self.docs):
-                doc = self.docs[idx].copy()
-                doc['score'] = float(dist)  # Include distance as score
-                results.append(doc)
-        return results
+        return None
+        # # D, I = self.index.search(np.array(query_emb), top_k)
+        # results = []
+        # for dist, idx in zip(D[0], I[0]):
+        #     if idx < len(self.docs):
+        #         doc = self.docs[idx].copy()
+        #         doc['score'] = float(dist)  # Include distance as score
+        #         results.append(doc)
+        # return results
 
 # Global RAG service instance
 _rag_service: Optional[RAGService] = None

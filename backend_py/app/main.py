@@ -1,5 +1,3 @@
-"""Entry point for the FastAPI/Socket.IO ASGI application."""
-
 from __future__ import annotations
 import os
 import logging
