@@ -39,6 +39,7 @@ html {
     --color-surface: #1A1C29; /* Slightly lighter background for sections/cards */
     --color-text-primary: #FFFFFF; /* Main white text */
     --color-text-secondary: #F0F0F0; /* Subtle gray text */
+    --color-pink-highlight: #FF69B4; /* Hot Pink for highlight */
     --color-glassy-bg: rgba(26, 28, 41, 0.6); /* Semi-transparent surface */
   }
 }

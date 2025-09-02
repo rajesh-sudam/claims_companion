@@ -56,7 +56,7 @@ const Header = () => {
               </Link>
             ))}
             {isAuthenticated && (
-              <Link href="/new-claim" className="text-[#F0F0F0] hover:text-[#A685FF] transition-colors" onClick={() => setIsMenuOpen(false)}>
+              <Link href="/claims/new" className="text-[#F0F0F0] hover:text-[#A685FF] transition-colors" onClick={() => setIsMenuOpen(false)}>
                 File a Claim
               </Link>
             )}

@@ -3,24 +3,46 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/router';
+import api from '@/utils/api'; // Import the API utility
 
 const LoginPage = () => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
   const { login } = useAuth();
   const router = useRouter();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real application, you would send these credentials to your backend for authentication.
-    // For this example, we'll just simulate a successful login.
-    if (username && password) {
-      // Simulate receiving a JWT token from a backend
-      const dummyToken = `fake-jwt-token-for-${username}-${Date.now()}`;
-      login(username, dummyToken);
+    setError(null);
+    setLoading(true);
+
+    if (!email || !password) {
+      setError('Please enter both email and password.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await api.post('/auth/login', {
+        email,
+        password,
+      });
+
+      const { user, token } = response.data;
+      
+      login(user.email, token, user.id);
       router.push('/my-claims'); // Redirect to my-claims page after login
-    } else {
-      alert('Please enter both username and password.');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      setError(
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        'Login failed. Please check your credentials.'
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -40,17 +62,17 @@ const LoginPage = () => {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
-              <label htmlFor="username" className="sr-only">Username</label>
+              <label htmlFor="email" className="sr-only">Email address</label>
               <input
-                id="username"
-                name="username"
-                type="text"
-                autoComplete="username"
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
                 required
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-600 placeholder-gray-500 text-base-100 bg-transparent focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Email address"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
               />
             </div>
             <div className="pt-4">
@@ -69,6 +91,12 @@ const LoginPage = () => {
             </div>
           </div>
 
+          {error && (
+            <p className="mt-2 text-center text-sm text-red-500">
+              {error}
+            </p>
+          )}
+
           <div className="flex items-center justify-between">
             <div className="text-sm">
               <Link href="#" className="font-medium text-primary hover:text-primary-dark">
@@ -80,9 +108,10 @@ const LoginPage = () => {
           <div>
             <button
               type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-text-primary bg-accent hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-text-primary bg-accent hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Sign in
+              {loading ? 'Signing In...' : 'Sign in'}
             </button>
           </div>
         </form>

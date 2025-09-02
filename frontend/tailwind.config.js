@@ -14,6 +14,7 @@ module.exports = {
           DEFAULT: "#8A5EFF",        // Bright purple accent
           hover: "#A685FF",          // Lighter purple hover state
         },
+        pinkHighlight: "#FF69B4",    // Hot Pink for highlight
         border: "#2A2C3A",           // Border / divider gray
       },
     },

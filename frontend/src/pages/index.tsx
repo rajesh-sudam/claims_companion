@@ -18,7 +18,7 @@ const HomePage = () => {
         </p>
         <div className="mt-10">
           {isAuthenticated && (
-            <Link href="/new-claim" className="px-8 py-4 text-lg font-semibold text-text-primary bg-primary rounded-lg hover:opacity-90 transition-opacity">
+            <Link href="/claims/new" className="px-8 py-4 text-lg font-semibold text-text-primary bg-primary rounded-lg hover:opacity-90 transition-opacity">
               File a Claim
             </Link>
           )}
@@ -108,7 +108,7 @@ const HomePage = () => {
             Get started today and let our AI-powered platform handle the rest.
           </p>
           {isAuthenticated && (
-            <Link href="/new-claim" className="mt-8 w-full inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-text-primary bg-primary hover:opacity-90 sm:w-auto">
+            <Link href="/claims/new" className="mt-8 w-full inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-text-primary bg-primary hover:opacity-90 sm:w-auto">
               File Your Claim Today
             </Link>
           )}

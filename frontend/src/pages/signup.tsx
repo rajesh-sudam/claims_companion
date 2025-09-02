@@ -55,18 +55,24 @@ const SignupPage = () => {
 
     setLoading(true);
     try {
-      // Simulate API call for signup
-      // In a real application, you would send these credentials to your backend:
-      // const response = await api.post('/auth/signup', { firstName, lastName, email, phoneNumber, password });
-      // console.log('Signup successful:', response.data);
+      const response = await api.post('/auth/register', {
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        phone: phoneNumber,
+        password,
+      });
 
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-
-      console.log('User signed up:', { firstName, lastName, email, phoneNumber });
+      console.log('Signup successful:', response.data);
       alert('Signup successful! Please log in.');
       router.push('/login'); // Redirect to login page after signup
-    } catch (err) {
-      setError('An unexpected error occurred during signup. (Simulated error)');
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      setError(
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        'Signup failed. Please try again.'
+      );
     } finally {
       setLoading(false);
     }

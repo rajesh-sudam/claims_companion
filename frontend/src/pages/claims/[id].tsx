@@ -1,10 +1,9 @@
 import { useRouter } from 'next/router';
-import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import api from '@/utils/api';
 import io from 'socket.io-client';
 import { ChangeEvent } from 'react';
-import LoginPage from '../login';
+import api from '@/utils/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ClaimDetail {
   id: number;
@@ -54,7 +53,6 @@ export default function ClaimDetailPage() {
   const [typing, setTyping] = useState<TypingEvent | null>(null);
   const [file, setFile] = useState<File | null>(null);
 
-
   // Fetch claim and progress
   useEffect(() => {
     if (!id) return;
@@ -87,22 +85,16 @@ export default function ClaimDetailPage() {
       // Join claim-specific room
       s.emit('join_claim', id);
     });
-    // Listen for incoming messages
     s.on('chat_message', (msg: ChatMessage) => {
-      setMessages((prev) => [...prev, msg]);
-      // Clear typing indicator when message received from ai
+      setMessages((prev: ChatMessage[]) => [...prev, msg]);
       setTyping(null);
     });
-    // Listen for typing indicator
     s.on('typing', (evt: TypingEvent) => {
       setTyping(evt);
     });
-    // Listen for claim updates
     s.on('claim_updated', (updated: any) => {
-      // Update claim status and fetch latest progress
       setClaim((prev) => prev ? { ...prev, status: updated.status, incident_description: updated.incident_description, estimated_completion: updated.estimated_completion } : prev);
-      // Optionally fetch progress again
-      api.get(`/claims/${id}/progress`).then((res) => setProgress(res.data.progress));
+      api.get(`/claims/${id}/progress`).then((res: { data: { progress: ProgressStep[] } }) => setProgress(res.data.progress));
     });
     return () => {
       if (s) {
@@ -146,17 +138,18 @@ export default function ClaimDetailPage() {
     }
   };
 
-
   if (loading) return <p className="p-6">Loading claim...</p>;
   if (error) return <p className="p-6 text-red-500">{error}</p>;
   if (!claim) return null;
 
   return (
-    <div className="min-h-screen p-6 space-y-6"> 
-    <button onClick={() => router.api(LoginPage)} className="text-blue-600 hover:underline">Logout</button>
-      <h1 className="text-3xl font-bold">Claim {claim.claim_number}</h1>
-      {/* Claim summary */}
-        <div className="bg-white p-4 rounded shadow">
+    <div className="min-h-screen bg-background py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto space-y-6">
+      
+        <h1 className="text-4xl font-extrabold text-text-secondary mb-8 text-center">Claim {claim.claim_number}</h1>
+
+        {/* Claim summary */}
+        <div className="glassy-card p-10 rounded-lg shadow-lg">
           <h2 className="text-xl font-semibold mb-2">Summary</h2>
           <p><strong>Type:</strong> {claim.claim_type}</p>
           <p><strong>Status:</strong> {claim.status.replace(/_/g, ' ')}</p>
@@ -164,18 +157,18 @@ export default function ClaimDetailPage() {
           {claim.estimated_completion && <p><strong>Estimated Completion:</strong> {new Date(claim.estimated_completion).toLocaleDateString()}</p>}
         </div>
         {/* Progress timeline */}
-        <div className="bg-white p-4 rounded shadow">
-          <h2 className="text-xl font-semibold mb-2">Progress</h2>
-          <ol className="relative border-l border-gray-200">{
+        <div className="glassy-card p-10 rounded-lg shadow-lg">
+          <h2 className="text-2xl font-semibold mb-4 text-text-secondary">Progress</h2>
+          <ol className="relative border-l border-gray-700">{
             progress.map((step) => (
               <li key={step.id} className="mb-6 ml-6">
                 <span
-                  className={`absolute -left-3 flex items-center justify-center w-6 h-6 rounded-full ${step.status === 'completed' ? 'bg-green-500' : step.status === 'active' ? 'bg-blue-500' : 'bg-gray-300'}`}
+                  className={`absolute -left-3 flex items-center justify-center w-6 h-6 rounded-full text-white ${step.status === 'completed' ? 'bg-purple-500' : step.status === 'active' ? 'bg-pink-500' : 'bg-gray-500'}`}
                 >
-                  &nbsp;
+                  {step.status === 'completed' ? '✓' : '\u00A0'}
                 </span>
-                <h3 className="font-semibold leading-tight">{step.step_title}</h3>
-                <p className="text-sm text-gray-600">{step.description}</p>
+                <h3 className="font-semibold leading-tight text-text-secondary">{step.step_title}</h3>
+                <p className="text-sm text-gray-400">{step.description}</p>
                 {step.completed_at && (
                   <time className="block text-xs text-gray-500">{new Date(step.completed_at).toLocaleString()}</time>
                 )}
@@ -183,77 +176,78 @@ export default function ClaimDetailPage() {
             ))
           }</ol>
         </div>
-      {/* ... claim summary, progress */}
-      <div className="bg-white p-4 rounded shadow max-w-2xl">
-        <h2 className="text-xl font-semibold mb-2">Chat with Claims Assistant</h2>
-        <div className="h-64 overflow-y-auto border border-gray-200 p-3 mb-3 rounded">
-          {messages.map((msg) => (
-            <div key={msg.id} className={`mb-2 flex ${msg.message_type === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`rounded px-3 py-2 max-w-xs ${msg.message_type === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
-                {msg.attachment_url ? (
-                  <div className="mb-2">
-                    {msg.attachment_url.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                      <img src={msg.attachment_url} alt={msg.attachment_name || 'attachment'} className="max-w-full rounded" />
-                    ) : (
-                      <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-700">
-                        {msg.attachment_name || 'View attachment'}
-                      </a>
-                    )}
-                  </div>
-                ) : null}
-                {msg.message_text && <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>}
-                <p className="text-xs text-gray-400 text-right">{new Date(msg.created_at).toLocaleTimeString()}</p>
+        {/* ... claim summary, progress */}
+        <div className="glassy-card p-10 rounded-lg shadow-lg max-w-2xl">
+          <h2 className="text-2xl font-semibold mb-4 text-text-secondary">Chat with Claims Assistant</h2>
+          <div className="h-64 overflow-y-auto border border-gray-700 p-3 mb-3 rounded">
+            {messages.map((msg) => (
+              <div key={msg.id} className={`mb-2 flex ${msg.message_type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`rounded px-3 py-2 max-w-xs ${msg.message_type === 'user' ? 'bg-primary text-white' : 'bg-gray-700 text-text-primary'}`}>
+                  {msg.attachment_url ? (
+                    <div className="mb-2">
+                      {msg.attachment_url.match(/\.(jpg|jpeg|png|gif)$/i) ? (
+                        <img src={msg.attachment_url} alt={msg.attachment_name || 'attachment'} className="max-w-full rounded" />
+                      ) : (
+                        <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" className="underline text-blue-400">
+                          {msg.attachment_name || 'View attachment'}
+                        </a>
+                      )}
+                    </div>
+                  ) : null}
+                  {msg.message_text && <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>}
+                  <p className="text-xs text-gray-400 text-right">{new Date(msg.created_at).toLocaleTimeString()}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-        {typing && (
-          <p className="text-sm text-gray-500 mb-2">
-            {typing.from === 'ai' ? 'Claims Assistant is typing...' : ''}
-          </p>
-        )}
-        <div className="flex space-x-2 items-center">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type your message..."
-            className="flex-1 border border-gray-300 p-2 rounded"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-          />
-          <input
-            type="file"
-            onChange={handleFileChange}
-            className="hidden"
-            id="chat-file-upload"
-          />
-          <label
-            htmlFor="chat-file-upload"
-            className="cursor-pointer px-3 py-2 bg-gray-100 rounded border border-gray-300 text-sm"
-          >
-            📎
-          </label>
+            ))}
+          </div>
+          {typing && (
+            <p className="text-sm text-gray-500 mb-2">
+              {typing.from === 'ai' ? 'Claims Assistant is typing...' : ''}
+            </p>
+          )}
+          <div className="flex space-x-2 items-center">
+            <input
+              type="text"
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder="Type your message..."
+              className="flex-1 border border-gray-600 p-2 rounded bg-background text-text-secondary"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+            />
+            <input
+              type="file"
+              onChange={handleFileChange}
+              className="hidden"
+              id="chat-file-upload"
+            />
+            <label
+              htmlFor="chat-file-upload"
+              className="cursor-pointer px-3 py-2 bg-gray-800 rounded border border-gray-600 text-sm text-text-secondary"
+            >
+              📎
+            </label>
+            <button
+              onClick={sendMessage}
+              className="bg-accent text-text-primary px-4 py-2 rounded hover:bg-accent-hover"
+            >
+              Send
+            </button>
+          </div>
+          {file && (
+            <p className="text-xs text-gray-500 mt-1">Selected: {file.name}</p>
+          )}
           <button
-            onClick={sendMessage}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            onClick={handleEscalate}
+            className="mt-3 text-sm text-purple-600 underline"
           >
-            Send
+            Escalate to human agent
           </button>
         </div>
-        {file && (
-          <p className="text-xs text-gray-500 mt-1">Selected: {file.name}</p>
-        )}
-        <button
-          onClick={handleEscalate}
-          className="mt-3 text-sm text-purple-600 underline"
-        >
-          Escalate to human agent
-        </button>
       </div>
     </div>
   );

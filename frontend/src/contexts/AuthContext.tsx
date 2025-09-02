@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  user: { name: string } | null;
-  login: (username: string, token: string) => void; // Modified to accept token
+  user: { id: string; email: string; first_name?: string; last_name?: string; phone?: string; role: string } | null; // Updated user type
+  login: (email: string, token: string, userId: string) => void; // Changed username to email
   logout: () => void;
 }
 
@@ -11,30 +11,32 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [user, setUser] = useState<{ name: string } | null>(null);
+  const [user, setUser] = useState<AuthContextType['user'] | null>(null); // Use the updated type
 
   useEffect(() => {
     const token = localStorage.getItem('jwt_token');
-    const storedUsername = localStorage.getItem('username');
-    if (token && storedUsername) {
-      // In a real app, you would validate the token with your backend
-      // For this example, we'll assume presence means valid
+    const storedEmail = localStorage.getItem('email'); // Changed to email
+    const storedUserId = localStorage.getItem('userId');
+    if (token && storedEmail && storedUserId) {
       setIsAuthenticated(true);
-      setUser({ name: storedUsername });
+      // Reconstruct user object from stored data, assuming we only stored email and id
+      setUser({ id: storedUserId, email: storedEmail, role: 'user' }); // Default role to 'user' or fetch full user data
     }
   }, []);
 
-  const login = (username: string, token: string) => {
+  const login = (email: string, token: string, userId: string) => { // Changed username to email
     localStorage.setItem('jwt_token', token);
-    localStorage.setItem('username', username);
+    localStorage.setItem('email', email); // Changed to email
+    localStorage.setItem('userId', userId);
     setIsAuthenticated(true);
-    setUser({ name: username });
-    console.log('User logged in:', username);
+    setUser({ id: userId, email: email, role: 'user' }); // Store minimal user data, or fetch full user data
+    console.log('User logged in:', email);
   };
 
   const logout = () => {
     localStorage.removeItem('jwt_token');
-    localStorage.removeItem('username');
+    localStorage.removeItem('email'); // Changed to email
+    localStorage.removeItem('userId');
     setIsAuthenticated(false);
     setUser(null);
     console.log('User logged out');

@@ -1,17 +1,55 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import api from '@/utils/api'; // Import the API utility
+
+interface Claim {
+  id: string;
+  claim_number: string; // Changed from 'type' to 'claim_number'
+  claim_type: string; // Added 'claim_type'
+  status: string;
+  incident_date: string; // Changed from 'date' to 'incident_date'
+  estimated_completion?: string; // Added optional 'estimated_completion'
+}
 
 const MyClaimsPage = () => {
   const { isAuthenticated, user } = useAuth();
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Dummy data for claims
-  const claims = [
-    { id: 'CLM001', type: 'Auto', status: 'Pending', date: '2023-01-15' },
-    { id: 'CLM002', type: 'Home', status: 'Approved', date: '2023-02-20' },
-    { id: 'CLM003', type: 'Health', status: 'Rejected', date: '2023-03-10' },
-  ];
+  useEffect(() => {
+    const fetchClaims = async () => {
+      if (!isAuthenticated) { // Removed user?.userId check as it's not needed for this endpoint
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await api.get('/claims'); // Changed API path
+        const fetchedClaims = response.data.claims.map((c: any) => ({
+          id: c.id,
+          claim_number: c.claim_number,
+          claim_type: c.claim_type,
+          status: c.status,
+          incident_date: c.incident_date,
+          estimated_completion: c.estimated_completion,
+        }));
+        setClaims(fetchedClaims);
+
+      } catch (err) {
+        setError('Failed to fetch claims. Please try again.');
+        console.error('Error fetching claims:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchClaims();
+  }, [isAuthenticated]); // Refetch when authentication status changes
 
   if (!isAuthenticated) {
     return (
@@ -43,10 +81,18 @@ const MyClaimsPage = () => {
           My Claims
         </h1>
 
-        {claims.length === 0 ? (
+        {loading ? (
+          <div className="glassy-card p-10 rounded-lg shadow-lg text-center text-text-secondary">
+            <p className="text-lg">Loading claims...</p>
+          </div>
+        ) : error ? (
+          <div className="glassy-card p-10 rounded-lg shadow-lg text-center text-red-500">
+            <p className="text-lg">{error}</p>
+          </div>
+        ) : claims.length === 0 ? (
           <div className="glassy-card p-10 rounded-lg shadow-lg text-center text-text-secondary">
             <p className="text-lg">You have no claims submitted yet.</p>
-            <Link href="/new-claim" className="mt-4 inline-block px-6 py-3 border border-transparent text-base font-medium rounded-md text-text-primary bg-primary hover:opacity-90">
+            <Link href="/claims/new" className="mt-4 inline-block px-6 py-3 border border-transparent text-base font-medium rounded-md text-text-primary bg-primary hover:opacity-90">
               File a New Claim
             </Link>
           </div>
@@ -57,16 +103,16 @@ const MyClaimsPage = () => {
                 <thead className="glassy-card">
                   <tr>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Claim ID
+                      Claim Number
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Type
+                      Claim Type
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                       Status
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                      Date
+                      Incident Date
                     </th>
                     <th scope="col" className="relative px-6 py-3">
                       <span className="sr-only">View</span>
@@ -77,22 +123,22 @@ const MyClaimsPage = () => {
                   {claims.map((claim) => (
                     <tr key={claim.id}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-text-secondary">
-                        {claim.id}
+                        {claim.claim_number}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {claim.type}
+                        {claim.claim_type}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          claim.status === 'Approved' ? 'bg-green-100 text-green-800' :
-                          claim.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                          claim.status === 'approved' ? 'bg-green-100 text-green-800' :
+                          claim.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-red-100 text-red-800'
                         }`}>
                           {claim.status}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {claim.date}
+                        {new Date(claim.incident_date).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <Link href={`/claims/${claim.id}`} className="text-primary hover:text-primary-dark">
