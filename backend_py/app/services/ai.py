@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List, Dict, Optional, Union
 from openai import AsyncOpenAI, OpenAI
-from typing import Dict
-
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -21,7 +19,6 @@ if OPENAI_API_KEY:
 else:
     print("DEBUG INIT: No OpenAI API key found - client not initialized")
 
-
 def _fmt_dt(dt: Any) -> str | None:
     if not dt:
         return None
@@ -32,63 +29,6 @@ def _fmt_dt(dt: Any) -> str | None:
     except Exception:
         return None
 
-async def summarize_claim_for_staff(claim, messages) -> Dict:
-    """
-    Returns dict with fields: summary (str), risk_score (0..1), facts (dict).
-    Uses your existing OpenAI client.
-    """
-    if not _client:
-        # Fallback if no OpenAI client available
-        return {
-            "summary": f"Basic summary: {claim.claim_type} claim with status {claim.status}",
-            "risk_score": 0.5,
-            "facts": {"claim_type": claim.claim_type, "status": claim.status}
-        }
-    
-    # Minimal, deterministic-ish prompt:
-    prompt = f"""
-You are an insurance intake assistant for staff. Summarize the claim succinctly,
-list key facts, and estimate a risk score 0..1 (1 = likely fraud/deny, 0 = very safe).
-Claim:
-- Number: {claim.claim_number}
-- Type: {claim.claim_type}
-- Status: {claim.status}
-- Description: {claim.incident_description or 'N/A'}
-
-Recent user messages (latest last):
-{chr(10).join(f"- {m.role}: {m.message}" for m in messages[-8:])}
-
-Return JSON with keys: summary, risk_score, facts.
-"""
-    
-    try:
-        resp = await _client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            max_tokens=300,
-            temperature=0.1
-        )
-        
-        import json
-        result = json.loads(resp.choices[0].message.content)
-        return result
-        
-    except Exception as e:
-        print(f"AI summary error: {e}")
-        return {
-            "summary": f"Error generating AI summary. Claim type: {claim.claim_type}, Status: {claim.status}",
-            "risk_score": 0.5,
-            "facts": {"error": str(e), "claim_type": claim.claim_type}
-        }
-
-def summarize_claim(claim_type: str, description: str, status: str) -> str:
-    # super lightweight fallback summary (replace with real OpenAI call if you prefer)
-    return (
-        f"Claim type: {claim_type}. Status: {status}. "
-        f"User reported: {description[:400]}{'...' if len(description) > 400 else ''}"
-    )
-
 @dataclass
 class AICitation:
     id: str
@@ -97,18 +37,13 @@ class AICitation:
     score: Optional[float] = None
     snippet: Optional[str] = None
 
-
 @dataclass
 class AIAnswer:
     answer: str
     citations: List[AICitation]
 
-
 def _normalize_context(context_chunks: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """
-    Ensure each context chunk has: id, text, doc_id, chunk_id, score.
-    Accepts either raw strings or dicts from your RAG service.
-    """
+    """Ensure each context chunk has: id, text, doc_id, chunk_id, score."""
     print(f"DEBUG NORMALIZE: Input chunks count: {len(context_chunks)}")
     print(f"DEBUG NORMALIZE: Input chunk types: {[type(ch).__name__ for ch in context_chunks]}")
     
@@ -140,9 +75,13 @@ def _normalize_context(context_chunks: List[Union[str, Dict[str, Any]]]) -> List
     print(f"DEBUG NORMALIZE: After filtering empty text: {len(filtered)} chunks remain")
     return filtered
 
-
-def _build_system_prompt(claim: Any, norm_context: List[Dict[str, Any]]) -> str:
-    print(f"DEBUG PROMPT: Building system prompt with {len(norm_context)} context chunks")
+def _build_enhanced_system_prompt(
+    claim: Any, 
+    norm_context: List[Dict[str, Any]], 
+    validation_status: Optional[Dict[str, Any]] = None
+) -> str:
+    """Build enhanced system prompt with validation context"""
+    print(f"DEBUG PROMPT: Building enhanced system prompt with {len(norm_context)} context chunks")
     
     claim_number = getattr(claim, "claim_number", None) or f"#{getattr(claim, 'id', 'N/A')}"
     claim_type = getattr(claim, "claim_type", None) or "claim"
@@ -162,89 +101,136 @@ def _build_system_prompt(claim: Any, norm_context: List[Dict[str, Any]]) -> str:
         print(f"DEBUG PROMPT: Added context block {c['id']} with {len(preview)} chars")
 
     context_str = "\n\n---\n\n".join(blocks) if blocks else "No context provided."
+    
+    # Add validation status information
+    validation_context = ""
+    if validation_status:
+        progress = validation_status.get('progress', 0)
+        next_prompt = validation_status.get('next_prompt', '')
+        decision_hint = validation_status.get('decision_hint', '')
+        validation_summary = validation_status.get('validation_summary', {})
+        
+        validation_context = f"""
+        
+CURRENT VALIDATION STATUS:
+- Progress: {progress}% complete
+- Decision Status: {decision_hint}
+- Next Step: {next_prompt}
+- Completed Items: {validation_summary.get('completed_items', 0)}/{validation_summary.get('total_items', 0)}
+- Missing Items: {validation_summary.get('missing_items', 0)}
+- Invalid Items: {validation_summary.get('invalid_items', 0)}
+
+VALIDATION GUIDANCE:
+- If documents are missing: Guide the user to upload specific required documents
+- If documents are invalid: Explain what's wrong and how to fix it  
+- If progress is high: Congratulate and explain next steps
+- Always be specific about what's needed rather than giving generic responses
+"""
+
     print(f"DEBUG PROMPT: Final context string length: {len(context_str)}")
+    print(f"DEBUG PROMPT: Validation context length: {len(validation_context)}")
 
     prompt = (
-        "You are a helpful insurance claims assistant for NovaWorks insurance.\n\n"
+        "You are an intelligent insurance claims assistant for NovaWorks insurance with advanced document validation capabilities.\n\n"
         
-        "INSTRUCTIONS:\n"
-        "- Your primary goal is to answer the user's questions based on the provided CONTEXT.\n"
-        "- The CONTEXT contains both information about the user's specific claim and excerpts from the policy documents.\n"
-        "- If the answer is in the CONTEXT, you must cite the source using the format [context-id].\n"
-        "- If the answer is not in the CONTEXT, politely state that you cannot find the information.\n"
-        "- For greetings: Respond warmly as their claims assistant.\n"
-        "- Be helpful and concise.\n\n"
+        "ENHANCED INSTRUCTIONS:\n"
+        "- Answer user questions based on the provided CONTEXT and VALIDATION STATUS\n"
+        "- If validation status shows missing/invalid documents, provide specific guidance\n"
+        "- Use validation progress to tailor your responses appropriately\n"
+        "- Cite sources using [context-id] format when referencing policy information\n"
+        "- Be encouraging about progress made while being clear about remaining requirements\n"
+        "- For document issues, explain exactly what's needed and why\n"
+        "- If user just uploaded a document, acknowledge it and explain next steps\n\n"
         
-        f"CONTEXT:\n"
+        f"CLAIM INFORMATION:\n"
         f"Claim Number: {claim_number}\n"
         f"Claim Type: {claim_type}\n"
         f"Status: {status}\n"
         f"Created: {created or 'unknown'}\n"
-        f"Incident Description: {desc or 'n/a'}\n\n"
-        f"Policy Information:\n"
+        f"Incident Description: {desc or 'n/a'}\n"
+        
+        f"{validation_context}\n"
+        
+        f"POLICY CONTEXT:\n"
         f"{context_str}\n\n"
         
         "RESPONSE FORMAT - Always respond with valid JSON:\n"
         "{\n"
-        '  "answer": "your response here",\n'
-        '  "citations": [{"id": "context-id"}] // only if you used the policy information\n'
-        "}\n"
+        '  "answer": "your helpful and specific response here",\n'
+        '  "citations": [{"id": "context-id"}] // include if you referenced policy information\n'
+        "}\n\n"
+        
+        "RESPONSE GUIDELINES:\n"
+        "- Be warm, professional, and encouraging\n"
+        "- Acknowledge any documents uploaded\n"
+        "- Provide specific next steps based on validation status\n"
+        "- Explain progress made and remaining requirements\n"
+        "- Give constructive feedback on document issues\n"
+        "- Use plain language, avoid insurance jargon\n"
     )
     
-    print(f"DEBUG PROMPT: Final system prompt length: {len(prompt)}")
+    print(f"DEBUG PROMPT: Final enhanced system prompt length: {len(prompt)}")
     return prompt
-
 
 async def generate_ai_reply_rag(
     claim: Any,
     user_text: str,
-    context_chunks: List[Union[str, Dict[str, Any]]]
+    context_chunks: List[Union[str, Dict[str, Any]]],
+    validation_status: Optional[Dict[str, Any]] = None
 ) -> AIAnswer:
-    """
-    Call OpenAI with RAG grounding and return a structured AIAnswer.
-    - If OPENAI_API_KEY is missing, returns a deterministic fallback.
-    - Ensures the model answers from context and returns machine-readable citations.
-    """
-    print(f"DEBUG MAIN: ========== Starting AI generation ==========")
+    """Enhanced AI reply generation with validation context"""
+    print(f"DEBUG MAIN: ========== Starting Enhanced AI generation ==========")
     print(f"DEBUG MAIN: User query: '{user_text}'")
     print(f"DEBUG MAIN: Client initialized: {_client is not None}")
     print(f"DEBUG MAIN: Raw context chunks received: {len(context_chunks)}")
+    print(f"DEBUG MAIN: Validation status provided: {validation_status is not None}")
     
     if context_chunks:
-        for i, chunk in enumerate(context_chunks[:3]):  # Show first 3
+        for i, chunk in enumerate(context_chunks[:3]):
             chunk_preview = str(chunk)[:150] + "..." if len(str(chunk)) > 150 else str(chunk)
             print(f"DEBUG MAIN: Chunk {i}: {chunk_preview}")
-    else:
-        print("DEBUG MAIN: NO CONTEXT CHUNKS PROVIDED")
     
     norm_context = _normalize_context(context_chunks)
     print(f"DEBUG MAIN: Normalized context chunks: {len(norm_context)}")
 
     # Fallback if API is unavailable
     if _client is None:
-        print("DEBUG MAIN: OpenAI client is None - using fallback")
-        fallback = "I cannot find this in the policy context."
+        print("DEBUG MAIN: OpenAI client is None - using enhanced fallback")
+        
+        # Enhanced fallback using validation status
+        if validation_status:
+            progress = validation_status.get('progress', 0)
+            next_prompt = validation_status.get('next_prompt', '')
+            
+            if progress < 50:
+                fallback = f"I see your claim is {progress}% complete. {next_prompt}"
+            elif progress < 100:
+                fallback = f"Great progress! Your claim is {progress}% complete. {next_prompt}"
+            else:
+                fallback = "Your claim documentation is complete! I'm processing your request."
+        else:
+            fallback = "I'm here to help with your claim. Please let me know what you need."
+        
         cits = []
-        # naive heuristic: if we have context, include first two ids
         for c in norm_context[:2]:
             cits.append(AICitation(id=c["id"], doc_id=c.get("doc_id"), chunk_id=c.get("chunk_id"), score=c.get("score")))
-        print(f"DEBUG MAIN: Fallback response with {len(cits)} citations")
+        
         return AIAnswer(answer=fallback, citations=cits)
 
-    system_prompt = _build_system_prompt(claim, norm_context)
+    system_prompt = _build_enhanced_system_prompt(claim, norm_context, validation_status)
 
     try:
-        print("DEBUG MAIN: Making OpenAI API call...")
+        print("DEBUG MAIN: Making enhanced OpenAI API call...")
         print(f"DEBUG MAIN: Model: {OPENAI_MODEL}")
         print(f"DEBUG MAIN: User message: '{user_text}'")
         
         resp = await _client.chat.completions.create(
             model=OPENAI_MODEL,
-            temperature=0.1,
-            max_tokens=450,
+            temperature=0.2,  # Slightly higher for more natural responses
+            max_tokens=600,   # Increased for more detailed responses
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
+                {"role": "user", "content": user_text or "I need help with my claim."},  # Handle empty messages
             ],
             response_format={"type": "json_object"},
         )
@@ -255,9 +241,8 @@ async def generate_ai_reply_rag(
         answer_text = ""
         citations: List[AICitation] = []
  
-        # Parse JSON strictly; if it fails, fallback gracefully
         try:
-            print("DEBUG MAIN: Parsing JSON response...")
+            print("DEBUG MAIN: Parsing enhanced JSON response...")
             data = json.loads(raw)
             print(f"DEBUG MAIN: Parsed JSON keys: {list(data.keys())}")
             
@@ -270,7 +255,7 @@ async def generate_ai_reply_rag(
             cit_ids = [str(c.get("id")) for c in raw_citations if isinstance(c, dict) and c.get("id")]
             print(f"DEBUG MAIN: Citation IDs: {cit_ids}")
             
-            # Map back to our rich context to attach doc/chunk/score
+            # Map back to context
             index: Dict[str, Dict[str, Any]] = {c["id"]: c for c in norm_context}
             print(f"DEBUG MAIN: Context index keys: {list(index.keys())}")
             
@@ -292,8 +277,13 @@ async def generate_ai_reply_rag(
         except json.JSONDecodeError as e:
             print(f"DEBUG MAIN: JSON parsing failed: {e}")
             print(f"DEBUG MAIN: Raw response was: '{raw}'")
-            # If the model didn't return JSON as requested, just pass through text
-            answer_text = raw or "I cannot find this in the policy context."
+            
+            # Enhanced fallback parsing with validation context
+            if validation_status and validation_status.get('next_prompt'):
+                answer_text = f"Thank you for your message. {validation_status.get('next_prompt')}"
+            else:
+                answer_text = raw or "I'm here to help with your claim."
+            
             for c in norm_context[:2]:
                 citations.append(AICitation(
                     id=c["id"],
@@ -302,13 +292,19 @@ async def generate_ai_reply_rag(
                     score=c.get("score"),
                     snippet=(c.get("text") or "")[:240]
                 ))
-            print(f"DEBUG MAIN: Using fallback parsing with {len(citations)} citations")
 
     except Exception as e:
         print(f"DEBUG MAIN: OpenAI API call failed: {type(e).__name__}: {e}")
-        print(f"DEBUG MAIN: Using error fallback")
-        # If the model didn't return JSON as requested, just pass through text
-        answer_text = "I cannot find this in the policy context."
+        
+        # Enhanced error fallback with validation context
+        if validation_status:
+            progress = validation_status.get('progress', 0)
+            next_prompt = validation_status.get('next_prompt', '')
+            answer_text = f"I'm processing your claim (currently {progress}% complete). {next_prompt}"
+        else:
+            answer_text = "I'm here to help with your claim. How can I assist you?"
+        
+        citations = []
         for c in norm_context[:2]:
             citations.append(AICitation(
                 id=c["id"],
@@ -318,15 +314,68 @@ async def generate_ai_reply_rag(
                 snippet=(c.get("text") or "")[:240]
             ))
 
-    # Final guardrail
+    # Final enhancement check
     if not answer_text.strip():
-        print("DEBUG MAIN: Empty answer, using final fallback")
-        answer_text = "I cannot find this in the policy context."
+        if validation_status and validation_status.get('next_prompt'):
+            answer_text = validation_status.get('next_prompt')
+        else:
+            answer_text = "How can I help you with your claim today?"
 
-    print(f"DEBUG MAIN: ========== Final result ==========")
+    print(f"DEBUG MAIN: ========== Enhanced Final result ==========")
     print(f"DEBUG MAIN: Answer: '{answer_text}'")
     print(f"DEBUG MAIN: Citations: {len(citations)}")
-    for i, cit in enumerate(citations):
-        print(f"DEBUG MAIN: Citation {i}: id={cit.id}, doc_id={cit.doc_id}, score={cit.score}")
-
+    
     return AIAnswer(answer=answer_text, citations=citations)
+
+async def summarize_claim_for_staff(claim, messages) -> Dict:
+    """Enhanced claim summary for staff with validation insights"""
+    if not _client:
+        return {
+            "summary": f"Basic summary: {claim.claim_type} claim with status {claim.status}",
+            "risk_score": 0.5,
+            "facts": {"claim_type": claim.claim_type, "status": claim.status}
+        }
+    
+    prompt = f"""
+You are an insurance staff assistant. Provide a comprehensive claim summary including validation insights.
+
+Claim Details:
+- Number: {claim.claim_number}
+- Type: {claim.claim_type}
+- Status: {claim.status}
+- Description: {claim.incident_description or 'N/A'}
+
+Recent Messages:
+{chr(10).join(f"- {m.role}: {m.message}" for m in messages[-8:])}
+
+Analyze for:
+- Completeness of documentation
+- Potential red flags or inconsistencies  
+- Risk factors (fraud indicators, unusual patterns)
+- Customer communication quality
+- Next recommended actions
+
+Return JSON with: summary, risk_score (0-1), facts, recommendations, validation_insights.
+"""
+    
+    try:
+        resp = await _client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            max_tokens=500,
+            temperature=0.1
+        )
+        
+        result = json.loads(resp.choices[0].message.content)
+        return result
+        
+    except Exception as e:
+        print(f"Enhanced AI summary error: {e}")
+        return {
+            "summary": f"Enhanced summary generation failed. Claim type: {claim.claim_type}, Status: {claim.status}",
+            "risk_score": 0.5,
+            "facts": {"error": str(e), "claim_type": claim.claim_type},
+            "recommendations": ["Manual review recommended due to AI processing error"],
+            "validation_insights": ["Unable to generate automated insights"]
+        }

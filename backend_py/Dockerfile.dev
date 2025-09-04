@@ -20,6 +20,7 @@ RUN addgroup --system app && adduser --system --group app
 # 5. Set working directory
 WORKDIR /home/app
 
+
 # 6. Create and set permissions for cache and uploads directories
 # This is done before copying code and installing dependencies
 RUN mkdir -p ${HF_HOME} && \
