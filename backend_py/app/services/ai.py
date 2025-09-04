@@ -113,7 +113,6 @@ def _build_enhanced_system_prompt(
         validation_context = f"""
         
 CURRENT VALIDATION STATUS:
-- Progress: {progress}% complete
 - Decision Status: {decision_hint}
 - Next Step: {next_prompt}
 - Completed Items: {validation_summary.get('completed_items', 0)}/{validation_summary.get('total_items', 0)}
@@ -123,7 +122,6 @@ CURRENT VALIDATION STATUS:
 VALIDATION GUIDANCE:
 - If documents are missing: Guide the user to upload specific required documents
 - If documents are invalid: Explain what's wrong and how to fix it  
-- If progress is high: Congratulate and explain next steps
 - Always be specific about what's needed rather than giving generic responses
 """
 
@@ -328,16 +326,52 @@ async def generate_ai_reply_rag(
     return AIAnswer(answer=answer_text, citations=citations)
 
 async def summarize_claim_for_staff(claim, messages) -> Dict:
-    """Enhanced claim summary for staff with validation insights"""
     if not _client:
         return {
             "summary": f"Basic summary: {claim.claim_type} claim with status {claim.status}",
             "risk_score": 0.5,
-            "facts": {"claim_type": claim.claim_type, "status": claim.status}
+            "facts": [{"name": "claim_type", "value": claim.claim_type},
+                      {"name": "status", "value": claim.status}],
+            "recommendations": [],
+            "validation_insights": []
         }
-    
+
+    json_schema = {
+        "name": "StaffClaimSummary",
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "summary": {"type": "string"},
+                "risk_score": {"type": "number", "minimum": 0, "maximum": 1},
+                "facts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {"type": "string"},
+                            "value": {"type": "string"}
+                        },
+                        "required": ["name", "value"]
+                    }
+                },
+                "recommendations": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "validation_insights": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                }
+            },
+            "required": ["summary", "risk_score", "facts", "recommendations", "validation_insights"]
+        },
+        "strict": True
+    }
+
     prompt = f"""
-You are an insurance staff assistant. Provide a comprehensive claim summary including validation insights.
+You are an insurance staff assistant. Return JSON ONLY that matches the schema.
 
 Claim Details:
 - Number: {claim.claim_number}
@@ -350,32 +384,31 @@ Recent Messages:
 
 Analyze for:
 - Completeness of documentation
-- Potential red flags or inconsistencies  
+- Potential red flags or inconsistencies
 - Risk factors (fraud indicators, unusual patterns)
 - Customer communication quality
 - Next recommended actions
-
-Return JSON with: summary, risk_score (0-1), facts, recommendations, validation_insights.
 """
-    
+
     try:
         resp = await _client.chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            max_tokens=500,
-            temperature=0.1
+            messages=[
+                {"role": "system", "content": "Output JSON only. No prose, no code fences, no comments."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=600,
+            response_format={"type": "json_schema", "json_schema": json_schema},
         )
-        
-        result = json.loads(resp.choices[0].message.content)
-        return result
-        
+        content = (resp.choices[0].message.content or "").strip()
+        return json.loads(content)
     except Exception as e:
         print(f"Enhanced AI summary error: {e}")
         return {
             "summary": f"Enhanced summary generation failed. Claim type: {claim.claim_type}, Status: {claim.status}",
             "risk_score": 0.5,
-            "facts": {"error": str(e), "claim_type": claim.claim_type},
+            "facts": [{"name": "error", "value": str(e)}],
             "recommendations": ["Manual review recommended due to AI processing error"],
             "validation_insights": ["Unable to generate automated insights"]
         }

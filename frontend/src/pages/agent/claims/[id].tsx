@@ -41,8 +41,30 @@ interface TypingEvent {
 
 interface AISummary {
   summary: string;
-  risk_score: number;
-  facts: Record<string, any>;
+  risk_score: number; // 0..1
+  facts: Record<string, any> | Array<{ name: string; value: any }>;
+}
+
+function normalizeFacts(
+  facts: AISummary["facts"]
+): Record<string, string> {
+  if (Array.isArray(facts)) {
+    const out: Record<string, string> = {};
+    for (const f of facts) {
+      if (f && typeof f === "object" && "name" in f) {
+        const key = String(f.name ?? "").trim();
+        if (key) out[key] = String((f as any).value ?? "");
+      }
+    }
+    return out;
+  }
+  if (facts && typeof facts === "object") {
+    // already a dictionary
+    return Object.fromEntries(
+      Object.entries(facts).map(([k, v]) => [k, String(v ?? "")])
+    );
+  }
+  return {};
 }
 
 export default function AgentClaimDetailPage() {
@@ -187,19 +209,28 @@ export default function AgentClaimDetailPage() {
                   <div
                     className="bg-red-500 h-4 rounded-full"
                     style={{ width: `${summary.risk_score * 100}%` }}
-                  ></div>
+        ></div>
                 </div>
                 <p className="text-right text-sm text-gray-400">{(summary.risk_score * 100).toFixed(0)}% Risk</p>
               </div>
               <div>
                 <h3 className="text-xl font-semibold text-text-secondary mb-2">Key Facts</h3>
-                <ul className="list-disc list-inside text-gray-300">
-                  {Object.entries(summary.facts).map(([key, value]) => (
-                    <li key={key}>
-                      <strong>{key.replace(/_/g, ' ')}:</strong> {String(value)}
-                    </li>
-                  ))}
-                </ul>
+                {(() => {
+                  const factsDict = normalizeFacts(summary.facts);
+                  const entries = Object.entries(factsDict);
+                  if (entries.length === 0) {
+                    return <p className="text-gray-400">No key facts available.</p>;
+                  }
+                  return (
+                    <ul className="list-disc list-inside text-gray-300">
+                      {entries.map(([key, value]) => (
+                        <li key={key}>
+                          <strong>{key.replace(/_/g, " ")}:</strong> {value}
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                })()}
               </div>
               <div className="mt-6 flex justify-end space-x-4">
                 <button onClick={() => handleStatusUpdate('accepted')} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Accept</button>
