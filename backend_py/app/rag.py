@@ -36,119 +36,64 @@ class InsuranceChunk:
     numerical_values: Dict[str, float]  # Extracted amounts, percentages
 
 class RAGService:
-    """Enhanced RAG Service - maintains your original interface"""
+    """Enhanced RAG Service - consolidates original and enhanced retrieval"""
     
     def __init__(self):
-        # Your original embedding model
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.docs = self._load_documents()
-        if self.docs:
-            self.embeddings = self.model.encode([doc['text'] for doc in self.docs])
-        else:
-            self.embeddings = np.array([])
-        
-        # Enhanced components
         self.document_processor = InsuranceDocumentProcessor()
-        self.vectorstore = None
+        self.vectorstore = None  # ChromaDB vectorstore
         self.hybrid_retriever = None
         
-    def _load_documents(self, file_paths: Optional[List[str]] = None):
-        """Your original document loading logic"""
-        docs = []
+        # Initialize the enhanced retrieval system at startup
+        print("Attempting to initialize enhanced retrieval system during RAGService init...")
+        self.initialize_enhanced_retrieval()
+
+    def _load_documents(self, file_paths: Optional[List[str]] = None) -> List[Document]:
+        """Loads documents from specified paths or DOCUMENTS_DIR, returning LangChain Documents."""
+        all_documents = []
         files_to_load = file_paths if file_paths is not None else [
             os.path.join(DOCUMENTS_DIR, f) for f in os.listdir(DOCUMENTS_DIR) 
             if f.endswith(".pdf")
         ]
         
+        if not files_to_load:
+            print(f"No PDF documents found in {DOCUMENTS_DIR} or provided paths.")
+            return []
+
         for path in files_to_load:
-            filename = os.path.basename(path)
-            if filename.endswith(".pdf"):
-                try:
-                    with open(path, "rb") as f:
-                        reader = PyPDF2.PdfReader(f)
-                        text = ""
-                        for page in reader.pages:
-                            text += page.extract_text() or ""
-                        # Split into chunks (e.g., 2000 chars)
-                        chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
-                        for idx, chunk in enumerate(chunks):
-                            docs.append({
-                                "id": f"{filename}-{idx}",
-                                "text": chunk,
-                                "doc_id": filename,
-                                "chunk_id": str(idx)
-                            })
-                except Exception as e:
-                    print(f"Error reading {filename}: {e}")
-        return docs
+            try:
+                loader = PyPDFLoader(path)
+                documents = loader.load()
+                all_documents.extend(documents)
+                print(f"Loaded {len(documents)} pages from {path}")
+            except Exception as e:
+                print(f"Error loading document {path}: {e}")
+        return all_documents
 
     def add_documents(self, file_paths: List[str]):
+        """Adds new documents to the RAG system by re-initializing the retriever."""
         if not file_paths:
             return
         
-        try:
-            all_documents = []
-            for path in file_paths:
-                # Handle both absolute and relative paths
-                if not os.path.isabs(path):
-                    # Try relative to app directory first
-                    abs_path = os.path.join("/home/app", path)
-                    if not os.path.exists(abs_path):
-                        abs_path = os.path.join("/home/app/app", path)
-                else:
-                    abs_path = path
-                
-                if os.path.exists(abs_path) and abs_path.endswith('.pdf'):
-                    loader = PyPDFLoader(abs_path)
-                    documents = loader.load()
-                    all_documents.extend(documents)
-                    print(f"Loaded {len(documents)} pages from {abs_path}")
-                else:
-                    print(f"File not found: {abs_path}")
-        except Exception as e:
-            print(f"Error adding documents: {e}")
+        print(f"Adding {len(file_paths)} new documents. Re-initializing RAG service.")
+        # For simplicity, re-initialize the entire enhanced retrieval with new documents
+        # In a production system, you'd update the vectorstore incrementally.
+        self.initialize_enhanced_retrieval(new_file_paths=file_paths)
 
-    def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        if self.hybrid_retriever:
-            try:
-                docs = self.hybrid_retriever.get_relevant_documents(query)
-                results = []
-                seen_content = set()
-                
-                for i, doc in enumerate(docs[:top_k * 2]):  # Get more to account for duplicates
-                    # Create a simple hash of the content to detect duplicates
-                    content_hash = hash(doc.page_content[:100])
-                    if content_hash not in seen_content:
-                        seen_content.add(content_hash)
-                        results.append({
-                            "id": f"enhanced-{len(results)}",
-                            "text": doc.page_content,
-                            "doc_id": doc.metadata.get('source', 'unknown'),
-                            "chunk_id": str(doc.metadata.get('chunk_id', len(results))),
-                            "score": 1.0 - (len(results) * 0.1),
-                            "section_type": doc.metadata.get('section_type', ''),
-                            "hierarchy": doc.metadata.get('hierarchy', ''),
-                            "cross_references": doc.metadata.get('cross_references', ''),
-                            "conditions": doc.metadata.get('conditions', '')
-                        })
-                        
-                        if len(results) >= top_k:
-                            break
-            except Exception as E:
-                print(f"Retrival Error {E}")
-                
-                return results
-    
-    def initialize_enhanced_retrieval(self, pdf_path: str, persist_directory: str = "/tmp/chroma_rag_db"):
-        """Initialize enhanced retrieval capabilities"""
+    def initialize_enhanced_retrieval(self, persist_directory: str = "/tmp/chroma_rag_db", new_file_paths: Optional[List[str]] = None):
+        """Initialize enhanced retrieval capabilities by loading all documents from DOCUMENTS_DIR or provided paths."""
         try:
-            # Load documents using LangChain
-            loader = PyPDFLoader(pdf_path)
-            documents = loader.load()
-            print(f"Loaded {len(documents)} pages from {pdf_path}")
+            # Load all documents from the predefined directory or provided new paths
+            all_documents = self._load_documents(file_paths=new_file_paths)
+            
+            if not all_documents:
+                print("No documents loaded for enhanced retrieval. Skipping vectorstore creation.")
+                self.hybrid_retriever = None # Ensure retriever is None if no docs
+                return
+
+            print(f"Total {len(all_documents)} pages loaded for enhanced retrieval.")
             
             # Process with intelligent chunking
-            insurance_chunks = self.document_processor.intelligent_chunking(documents)
+            insurance_chunks = self.document_processor.intelligent_chunking(all_documents)
             print(f"Created {len(insurance_chunks)} intelligent chunks")
             
             # Convert to LangChain documents
@@ -182,6 +127,109 @@ class RAGService:
             
         except Exception as e:
             print(f"Failed to initialize enhanced retrieval: {e}")
+            import traceback
+            traceback.print_exc() # Print full traceback for debugging
+            self.hybrid_retriever = None # Ensure retriever is None on failure
+
+    def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Main retrieval method. Uses hybrid_retriever if initialized, otherwise returns empty list."""
+        if self.hybrid_retriever:
+            try:
+                docs = self.hybrid_retriever.get_relevant_documents(query)
+                results = []
+                seen_content = set()
+                
+                for i, doc in enumerate(docs[:top_k * 2]):  # Get more to account for duplicates
+                    # Create a simple hash of the content to detect duplicates
+                    content_hash = hash(doc.page_content[:100])
+                    if content_hash not in seen_content:
+                        seen_content.add(content_hash)
+                        results.append({
+                            "id": f"enhanced-{len(results)}",
+                            "text": doc.page_content,
+                            "doc_id": doc.metadata.get('source', 'unknown'),
+                            "chunk_id": str(doc.metadata.get('chunk_id', len(results))),
+                            "score": 1.0 - (len(results) * 0.1),
+                            "section_type": doc.metadata.get('section_type', ''),
+                            "hierarchy": doc.metadata.get('hierarchy', ''),
+                            "cross_references": doc.metadata.get('cross_references', ''),
+                            "conditions": doc.metadata.get('conditions', '')
+                        })
+                        
+                        if len(results) >= top_k:
+                            break
+                return results
+            except Exception as E:
+                print(f"Retrieval Error in hybrid_retriever: {E}")
+                import traceback
+                traceback.print_exc()
+                return [] # Return empty list on error
+        else:
+            print("RAGService: Hybrid retriever not initialized. Cannot perform retrieval.")
+            return [] # Return empty list if no retriever is available
+    
+    def initialize_enhanced_retrieval(self, persist_directory: str = "/tmp/chroma_rag_db"):
+        """Initialize enhanced retrieval capabilities by loading all documents from DOCUMENTS_DIR."""
+        try:
+            # Load all documents from the predefined directory
+            all_documents = []
+            files_to_load = [
+                os.path.join(DOCUMENTS_DIR, f) for f in os.listdir(DOCUMENTS_DIR)
+                if f.endswith(".pdf")
+            ]
+            if not files_to_load:
+                print(f"No PDF documents found in {DOCUMENTS_DIR} for enhanced retrieval initialization.")
+                return
+
+            for doc_path in files_to_load:
+                loader = PyPDFLoader(doc_path)
+                documents = loader.load()
+                all_documents.extend(documents)
+                print(f"Loaded {len(documents)} pages from {doc_path}")
+            
+            if not all_documents:
+                print("No documents loaded for enhanced retrieval. Skipping vectorstore creation.")
+                return
+
+            print(f"Total {len(all_documents)} pages loaded for enhanced retrieval.")
+            
+            # Process with intelligent chunking
+            insurance_chunks = self.document_processor.intelligent_chunking(all_documents)
+            print(f"Created {len(insurance_chunks)} intelligent chunks")
+            
+            # Convert to LangChain documents
+            langchain_docs = self._convert_to_langchain_docs(insurance_chunks)
+            
+            # Create or load vectorstore
+            embed_model = FastEmbedEmbeddings(model_name="BAAI/bge-base-en-v1.5")
+            
+            if os.path.exists(persist_directory) and os.listdir(persist_directory):
+                print(f"Loading existing vectorstore from {persist_directory}")
+                self.vectorstore = Chroma(
+                    persist_directory=persist_directory,
+                    embedding_function=embed_model
+                )
+            else:
+                print(f"Creating new vectorstore at {persist_directory}")
+                self.vectorstore = Chroma.from_documents(
+                langchain_docs,
+                embedding=embed_model,
+                persist_directory=persist_directory,
+                client_settings=Settings(
+                    chroma_db_impl="duckdb+parquet",
+                    persist_directory=persist_directory,
+                    anonymized_telemetry=False
+                )
+                    )
+            
+            # Initialize hybrid retriever
+            self.hybrid_retriever = HybridInsuranceRetriever(self.vectorstore, insurance_chunks)
+            print("Enhanced retrieval system initialized successfully")
+            
+        except Exception as e:
+            print(f"Failed to initialize enhanced retrieval: {e}")
+            import traceback
+            traceback.print_exc() # Print full traceback for debugging
             print("Falling back to original retrieval method")
     
     def _convert_to_langchain_docs(self, insurance_chunks: List[InsuranceChunk]) -> List[Document]:

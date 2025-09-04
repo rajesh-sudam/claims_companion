@@ -39,7 +39,7 @@ const AgentDashboard = () => {
         setLoadingClaims(true);
         setClaimsError(null);
         try {
-          const response = await api.get('/admin/claims', { params: { status: 'pending_human_review' } });
+          const response = await api.get('/admin/claims', { params: { status: ['pending_human_review', 'awaiting_documents'] } });
           setClaims(response.data.claims);
         } catch (err: any) {
           setClaimsError(err.response?.data?.detail || 'Failed to fetch unprocessed claims.');
@@ -90,20 +90,20 @@ const AgentDashboard = () => {
         ) : claims.length === 0 ? (
           <p className="text-lg text-gray-300">No unprocessed claims found.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-700">
-              <thead className="glassy-card">
+          <div className="overflow-x-auto bg-gray-900/50 rounded-lg border border-gray-700/50">
+            <table className="min-w-full divide-y divide-gray-800">
+              <thead className="bg-gray-800/50">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                     Claim Number
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                     Claim Type
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                     Status
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                     Incident Date
                   </th>
                   <th scope="col" className="relative px-6 py-3">
@@ -111,13 +111,13 @@ const AgentDashboard = () => {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-700">
+              <tbody className="divide-y divide-gray-800">
                 {claims.map((claim) => (
-                  <tr key={claim.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-text-secondary">
+                  <tr key={claim.id} className="hover:bg-gray-800/50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
                       {claim.claim_number}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 capitalize">
                       {claim.claim_type}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -129,8 +129,8 @@ const AgentDashboard = () => {
                       {new Date(claim.incident_date).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <Link href={`/agent/claims/${claim.id}`} className="text-primary hover:text-primary-dark">
-                        View
+                      <Link href={`/agent/claims/${claim.id}`} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                        View Claim
                       </Link>
                     </td>
                   </tr>

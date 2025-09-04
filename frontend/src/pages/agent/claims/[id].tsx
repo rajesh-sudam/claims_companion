@@ -27,7 +27,7 @@ interface ProgressStep {
 }
 
 interface ChatMessage {
-  id: number;
+  id: number | string;
   message_type: string;
   message_text: string;
   created_at: string;
@@ -43,6 +43,18 @@ interface AISummary {
   summary: string;
   risk_score: number; // 0..1
   facts: Record<string, any> | Array<{ name: string; value: any }>;
+}
+
+interface ClaimDocument {
+  id: number;
+  file_name: string;
+  file_url: string;
+  document_type: string;
+  status: string;
+  validation_status: string;
+  validation_confidence: number;
+  validation_issues: string[]; // JSON parsed from backend
+  validation_suggestions: string[]; // JSON parsed from backend
 }
 
 function normalizeFacts(
@@ -67,6 +79,22 @@ function normalizeFacts(
   return {};
 }
 
+const getValidationStatusColor = (status: string | null | undefined) => {
+  if (!status) return 'text-gray-400'; // Default for null/undefined
+  switch (status) {
+    case 'valid':
+      return 'text-green-400';
+    case 'invalid':
+      return 'text-red-400';
+    case 'pending_validation':
+    case 'needs_review':
+    case 'error':
+      return 'text-yellow-400'; // Use yellow for warning/pending states
+    default:
+      return 'text-gray-400'; // Fallback for any other unexpected status
+  }
+};
+
 export default function AgentClaimDetailPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -81,22 +109,25 @@ export default function AgentClaimDetailPage() {
   const [typing, setTyping] = useState<TypingEvent | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [summary, setSummary] = useState<AISummary | null>(null);
+  const [documents, setDocuments] = useState<ClaimDocument[]>([]);
 
   // Fetch claim, progress, and summary
   useEffect(() => {
     if (!id) return;
     const fetchData = async () => {
       try {
-        const [claimRes, progressRes, historyRes, summaryRes] = await Promise.all([
+        const [claimRes, progressRes, historyRes, summaryRes, documentsRes] = await Promise.all([
           api.get(`/admin/claims/${id}`), // Use admin endpoint for claim details
           api.get(`/admin/claims/${id}/progress`), // Use admin endpoint for progress
           api.get(`/admin/chat/${id}/history`), // Use admin endpoint for chat history
           api.get(`/admin/claims/${id}/summary`),
+          api.get(`/admin/claims/${id}/documents`),
         ]);
         setClaim(claimRes.data.claim);
         setProgress(progressRes.data.progress);
         setMessages(historyRes.data.history);
         setSummary(summaryRes.data);
+        setDocuments(documentsRes.data.documents);
       } catch (err: any) {
         setError(err.response?.data?.error || 'Failed to load claim data');
       } finally {
@@ -116,7 +147,23 @@ export default function AgentClaimDetailPage() {
       s.emit('join_claim', id);
     });
     s.on('chat_message', (msg: ChatMessage) => {
-      setMessages((prev: ChatMessage[]) => [...prev, msg]);
+      setMessages((prev: ChatMessage[]) => {
+        if (msg.message_type === 'user') {
+          // Find the optimistic message by its temporary ID or content
+          const optimisticIndex = prev.findIndex(
+            (m) => typeof m.id === 'string' && m.id.startsWith('temp-') && m.message_text === msg.message_text
+          );
+
+          if (optimisticIndex !== -1) {
+            // Replace the optimistic message with the real one from the server
+            const newMessages = [...prev];
+            newMessages[optimisticIndex] = msg;
+            return newMessages;
+          }
+        }
+        // If not a user message, or no optimistic message found, just add it
+        return [...prev, msg];
+      });
       setTyping(null);
     });
     s.on('typing', (evt: TypingEvent) => {
@@ -138,7 +185,7 @@ export default function AgentClaimDetailPage() {
     if (!newMessage.trim() && !file) return;
 
     const userMessage: ChatMessage = {
-      id: Date.now(),
+      id: 'temp-' + Date.now(), // Temporary ID for optimistic update
       message_type: 'user',
       message_text: newMessage,
       created_at: new Date().toISOString(),
@@ -204,14 +251,10 @@ export default function AgentClaimDetailPage() {
             <>
               <p className="text-lg text-gray-300 mb-4">{summary.summary}</p>
               <div className="mb-4">
-                <h3 className="text-xl font-semibold text-text-secondary mb-2">Risk Score</h3>
-                <div className="w-full bg-gray-700 rounded-full h-4">
-                  <div
-                    className="bg-red-500 h-4 rounded-full"
-                    style={{ width: `${summary.risk_score * 100}%` }}
-        ></div>
-                </div>
-                <p className="text-right text-sm text-gray-400">{(summary.risk_score * 100).toFixed(0)}% Risk</p>
+                
+                
+              
+  
               </div>
               <div>
                 <h3 className="text-xl font-semibold text-text-secondary mb-2">Key Facts</h3>
@@ -240,6 +283,40 @@ export default function AgentClaimDetailPage() {
             </>
           ) : (
             <p>Loading AI summary...</p>
+          )}
+        </div>
+
+        {/* Documents Section */}
+        <div className="glassy-card p-10 rounded-lg shadow-lg">
+          <h2 className="text-2xl font-semibold mb-4 text-text-secondary">Uploaded Documents</h2>
+          {documents.length === 0 ? (
+            <p className="text-gray-400">No documents uploaded for this claim yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {documents.map((doc) => (
+                <div key={doc.id} className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50 flex flex-col">
+                  <p className="font-semibold text-white truncate" title={doc.file_name}>{doc.file_name}</p>
+                  <p className="text-sm text-gray-400 capitalize">Type: {doc.document_type.replace(/_/g, ' ')}</p>
+                  <p className="text-sm text-gray-400">Status: <span className={`font-medium ${getValidationStatusColor(doc.validation_status)}`}>{doc.validation_status ? doc.validation_status.replace(/_/g, ' ') : 'N/A'}</span></p>
+                  {doc.validation_issues && doc.validation_issues.length > 0 && (
+                    <ul className="text-xs text-red-300 list-disc list-inside mt-1">
+                      {doc.validation_issues.map((issue, idx) => <li key={idx}>{issue}</li>)}
+                    </ul>
+                  )}
+                  {doc.validation_suggestions && doc.validation_suggestions.length > 0 && (
+                    <ul className="text-xs text-yellow-300 list-disc list-inside mt-1">
+                      {doc.validation_suggestions.map((sugg, idx) => <li key={idx}>{sugg}</li>)}
+                    </ul>
+                  )}
+                  <div className="mt-auto pt-3">
+                    <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-purple-400 hover:text-purple-300 text-sm font-medium">
+                      View Document
+                      <svg xmlns="http://www.w3.org/2000/svg" className="ml-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 

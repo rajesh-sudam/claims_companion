@@ -10,7 +10,7 @@ from pathlib import Path
 import PyPDF2
 from PIL import Image
 import pytesseract
-
+from datetime import date
 @dataclass
 class ChecklistItem:
     key: str
@@ -236,6 +236,22 @@ HEALTH_CHECKLIST: List[ChecklistItem] = [
         accept_ext=[".pdf", ".jpg", ".jpeg", ".png"],
         ai_validation_prompt="Check membership card matches policy holder information"
     ),
+    ChecklistItem(
+        "medical_invoices", 
+        "Itemized medical bills and invoices", 
+        True, 
+        "medical_invoices",
+        None,  # Remove claim_fields dependency
+        ai_validation_prompt="Verify invoices show treatment dates, medical conditions, and costs"
+    ),
+    ChecklistItem(
+        "medical_referral", 
+        "Doctor's referral letter or prescription", 
+        False, 
+        "referral",
+        None,
+        ai_validation_prompt="Check referral is from qualified medical practitioner"
+    )
 ]
 
 CHECKLISTS: Dict[str, List[ChecklistItem]] = {
@@ -461,7 +477,7 @@ class SmartClaimValidator:
                             confidence = max(confidence, validation_result.confidence_score)
                             validation_details[doc.file_name] = {
                                 'is_valid': validation_result.is_valid,
-                                'issues': validation_details.issues,
+                                'issues': validation_result.issues,
                                 'suggestions': validation_result.suggestions,
                                 'confidence': validation_result.confidence_score
                             }
@@ -478,9 +494,23 @@ class SmartClaimValidator:
                             break
                             
             elif item.claim_fields:
-                # Field-based validation
-                present = all(_has_field(f) for f in item.claim_fields)
-                confidence = 1.0 if present else 0.0
+            # Don't automatically mark claim fields as "complete"
+            # For insurance validation, fields need actual verification
+                present = False
+                confidence = 0.0
+                
+                # Only mark as complete if meets specific criteria
+                if item.key == "treatment_date":
+                    val = getattr(claim, "incident_date", None)
+                    if val and isinstance(val, date) and val <= date.today():
+                        present = True
+                        confidence = 0.8  # Lower confidence than document validation
+                
+                elif item.key == "description":
+                    val = getattr(claim, "incident_description", None)
+                    if val and len(str(val).strip()) >= 20:  # Require substantial description
+                        present = True
+                        confidence = 0.8
             
             # Determine state
             if present and not invalid and confidence > 0.6:

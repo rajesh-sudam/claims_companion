@@ -11,8 +11,9 @@ from ..models import Claim, ClaimProgress, ClaimDocument, User
 from ..auth_utils import decode_access_token
 from ..rag import analyse_claim_with_rag
 from .chat import initiate_smart_document_request, send_human_review_message
-from ..services.ai_validation import get_smart_validation_status, AIDocumentValidator
+from ..services.ai_validation import get_smart_validation_status, AIDocumentValidator 
 from ..services.ai import _client as openai_client
+from ..sockets import sio
 import os
 import json
 
@@ -256,25 +257,93 @@ async def upload_documents(
         await send_human_review_message(claim_id, db)
     
     db.commit()
+    # Debug: Show what documents are being considered for validation
+    print(f"DEBUG VALIDATION: ========== Validation Analysis for Claim {claim.id} ==========")
+    print(f"DEBUG VALIDATION: Claim Type: {claim.claim_type}")
+    print(f"DEBUG VALIDATION: Number of files uploaded: {len(files)}")
+
+# Show uploaded files
+    for i, file in enumerate(files):
+        print(f"DEBUG VALIDATION: File {i+1}: {file.filename}")
+
+# Get and display current claim documents from database
+    current_docs = db.query(ClaimDocument).filter(ClaimDocument.claim_id == claim.id).all()
+    print(f"DEBUG VALIDATION: Documents in database: {len(current_docs)}")
+    for doc in current_docs:
+        print(f"DEBUG VALIDATION: DB Doc: {doc.file_name} | Type: {doc.document_type} | Status: {doc.status}")
+
+# Show validation status breakdown
+    print(f"DEBUG VALIDATION: Validation Status Details:")
+    for item in validation_status.get('items', []):
+        print(f"DEBUG VALIDATION: - {item['key']}: {item['state']} (confidence: {item['confidence']}) - Required: {item['required']}")
+
+    print(f"DEBUG VALIDATION: Progress calculation: {validation_status.get('progress', 0)}%")
+    print(f"DEBUG VALIDATION: Decision hint: {validation_status.get('decision_hint')}")
+    print(f"DEBUG VALIDATION: Completed items: {validation_status.get('validation_summary', {}).get('completed_items', 0)}")
+    print(f"DEBUG VALIDATION: Total items: {validation_status.get('validation_summary', {}).get('total_items', 0)}")
+    print(f"DEBUG VALIDATION: ================================================")
+    # Upsert Progress Step for Document Upload
+    total_docs = db.query(ClaimDocument).filter(ClaimDocument.claim_id == claim_id).count()
+    progress_step = db.query(ClaimProgress).filter_by(claim_id=claim_id, step_id="documents_uploaded").first()
+
+    if progress_step:
+        # Update existing step
+        progress_step.description = f"{total_docs} document(s) uploaded and validated ({validation_status.get('progress', 0)}% complete)"
+        progress_step.completed_at = datetime.now(timezone.utc)
+    else:
+        # Create new step if it doesn't exist
+        progress_step = ClaimProgress(
+            claim_id=claim_id,
+            step_id="documents_uploaded",
+            step_title="Documents Uploaded",
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            description=f"{total_docs} document(s) uploaded and validated ({validation_status.get('progress', 0)}% complete)"
+        )
+        db.add(progress_step)
     
-    # Add progress step
-    upload_step = ClaimProgress(
-        claim_id=claim_id,
-        step_id="documents_uploaded",
-        step_title="Documents Uploaded",
-        status="completed",
-        completed_at=datetime.now(timezone.utc),
-        description=f"{len(files)} document(s) uploaded and validated ({validation_status.get('progress', 0)}% complete)"
-    )
-    db.add(upload_step)
     db.commit()
-    
+
+    # Fetch updated claim and progress to send to client for real-time UI update
+    updated_claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    progress_steps = db.query(ClaimProgress).filter(ClaimProgress.claim_id == claim_id).order_by(ClaimProgress.created_at).all()
+    room = str(claim_id)
+
+    await sio.emit(
+        "claim_updated",
+        {
+            "claim": {
+                "id": updated_claim.id,
+                "claim_number": updated_claim.claim_number,
+                "claim_type": updated_claim.claim_type,
+                "status": updated_claim.status,
+                "incident_date": updated_claim.incident_date.isoformat() if updated_claim.incident_date else None,
+                "validation_progress": getattr(updated_claim, 'validation_progress', 0),
+                "validation_status": getattr(updated_claim, 'validation_status', 'pending'),
+                "manual_review_required": getattr(updated_claim, 'manual_review_required', False)
+            },
+            "progress": [
+                {
+                    "id": step.id,
+                    "step_id": step.step_id,
+                    "step_title": step.step_title,
+                    "status": step.status,
+                    "completed_at": step.completed_at.isoformat() if step.completed_at else None,
+                    "description": step.description,
+                }
+                for step in progress_steps
+            ]
+        },
+        to=room
+    )
+    print(f"DEBUG CLAIMS: Emitted claim_updated event for claim {claim_id}")
+        
     return {
-        "uploaded_files": [doc.file_name for doc in uploaded_docs],
-        "validation_results": validation_results,
-        "overall_validation": validation_status,
-        "next_step": validation_status.get('next_prompt')
-    }
+                "uploaded_files": [doc.file_name for doc in uploaded_docs],
+                "validation_results": validation_results,
+                "overall_validation": validation_status,
+                "next_step": validation_status.get('next_prompt')
+            }
 
 @router.get("/{claim_id}/validation")
 async def get_claim_validation_status(

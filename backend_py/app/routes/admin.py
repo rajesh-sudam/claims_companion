@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from ..db import get_db
-from ..models import Claim, ChatMessage, UserRole, User, ClaimProgress
+from ..models import Claim, ChatMessage, UserRole, User, ClaimProgress, ClaimDocument
 from ..services.ai import summarize_claim_for_staff
 from ..auth_utils import require_active_user_with_roles
 
@@ -15,13 +15,13 @@ router = APIRouter()
 
 @router.get("/claims")
 async def list_admin_claims(
-    status: Optional[str] = Query(None),
+    status: Optional[List[str]] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin})),
 ):
     query = db.query(Claim)
     if status:
-        query = query.filter(Claim.status == status)
+        query = query.filter(Claim.status.in_(status))
     
     claims = query.order_by(Claim.created_at.desc()).all()
     
@@ -36,6 +36,25 @@ async def list_admin_claims(
         }
         for c in claims
     ]}
+
+@router.get("/claims-summary", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
+async def get_claims_summary(db: Session = Depends(get_db)):
+    """Provides a summary of claim counts by status."""
+    from sqlalchemy import func
+
+    summary_query = db.query(Claim.status, func.count(Claim.id)).group_by(Claim.status).all()
+    
+    summary = {status: count for status, count in summary_query}
+
+    return {
+        "message": "Successfully retrieved claim summary.",
+        "summary": summary,
+        "notes": [
+            "This endpoint shows the total number of claims for each status in the database.",
+            "The Agent Dashboard specifically looks for claims with the status 'pending_human_review'.",
+            "If the count for 'pending_human_review' is 0, the dashboard will be empty."
+        ]
+    }
 
 @router.get("/claims/{claim_id}/summary")
 async def get_claim_summary(claim_id: int, db: Session = Depends(get_db)):
@@ -114,6 +133,32 @@ async def get_admin_chat_history(claim_id: int, db: Session = Depends(get_db)):
             }
         )
     return {"history": history}
+
+@router.get("/claims/{claim_id}/documents", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
+async def get_admin_claim_documents(claim_id: int, db: Session = Depends(get_db)):
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    
+    documents = db.query(ClaimDocument).filter(ClaimDocument.claim_id == claim_id).all()
+    
+    return {
+        "claim_id": claim_id,
+        "documents": [
+            {
+                "id": doc.id,
+                "file_name": doc.file_name,
+                "file_url": doc.file_url,
+                "document_type": doc.document_type,
+                "status": doc.status,
+                "validation_status": doc.validation_status,
+                "validation_confidence": doc.validation_confidence,
+                "validation_issues": json.loads(doc.validation_issues) if doc.validation_issues else [],
+                "validation_suggestions": json.loads(doc.validation_suggestions) if doc.validation_suggestions else []
+            }
+            for doc in documents
+        ]
+    }
 
 @router.put("/claims/{claim_id}/status", dependencies=[Depends(require_active_user_with_roles({UserRole.agent, UserRole.admin}))])
 async def update_claim_status(claim_id: int, status_update: StatusUpdate, db: Session = Depends(get_db)):

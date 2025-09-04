@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List, Dict, Optional, Union
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI, OpenAI, RateLimitError
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -133,6 +133,7 @@ VALIDATION GUIDANCE:
         
         "ENHANCED INSTRUCTIONS:\n"
         "- Answer user questions based on the provided CONTEXT and VALIDATION STATUS\n"
+        "- When requesting a document, be conversational. Start by acknowledging the user and briefly referencing their claim's context (e.g., 'Regarding your claim for the incident on {incident_date}...'). Then, clearly state the next document needed based on the validation status. Do not just repeat the validation prompt verbatim.\n"
         "- If validation status shows missing/invalid documents, provide specific guidance\n"
         "- Use validation progress to tailor your responses appropriately\n"
         "- Cite sources using [context-id] format when referencing policy information\n"
@@ -290,6 +291,11 @@ async def generate_ai_reply_rag(
                     score=c.get("score"),
                     snippet=(c.get("text") or "")[:240]
                 ))
+
+    except RateLimitError as e:
+        print(f"DEBUG MAIN: OpenAI API rate limit exceeded: {e}")
+        answer_text = "Our AI systems are currently experiencing high traffic. Please try your request again in a minute."
+        citations = []
 
     except Exception as e:
         print(f"DEBUG MAIN: OpenAI API call failed: {type(e).__name__}: {e}")
