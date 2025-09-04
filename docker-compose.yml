@@ -17,16 +17,6 @@ services:
     networks:
       - claims-net
 
-  chroma:
-    image: chromadb/chroma
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      - chroma_data:/chroma/chroma
-    networks:
-      - claims-net
-
   backend:
     build:
       context: ./backend_py
@@ -35,8 +25,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      chroma:
-        condition: service_started
     env_file:
       - ./backend_py/.env
       - ./.env # Also give backend access to db credentials if needed
@@ -46,7 +34,9 @@ services:
     ports:
       - "4000:4000"
     volumes:
-      - ./backend_py/app:/home/app/app # Mount for hot-reloading
+      - ./backend_py/app:/home/app/app
+      - vectorstore_data:/tmp/chroma_rag_db
+      - uploads_data:/home/app/uploads # Mount for hot-reloading
     networks:
       - claims-net
 
@@ -67,8 +57,9 @@ services:
 
 volumes:
   naic-2025_db_data:
+  vectorstore_data:
+  uploads_data:
 
-  chroma_data:
 
 networks:
   claims-net:

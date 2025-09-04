@@ -31,9 +31,24 @@ torchvision==0.17.2+cpu
 torchaudio==2.2.2+cpu
 sentence-transformers==2.7.0
 chromadb==0.5.0
+langchain==0.2.5
+langchain-community==0.2.5
 
 # Document processing
-PyPDF2==3.0.1
-pytesseract==0.3.10
-pdf2image==1.17.0
-Pillow==10.3.0
+PyPDF2
+pypdf
+pytesseract
+pdf2image
+Pillow
+langchain
+langchain-community
+langchain-core
+langchain-experimental
+langchain-groq
+langchain-openai
+langchain-text-splitters
+langcodes
+langsmith
+chromadb
+ragas
+fastembed

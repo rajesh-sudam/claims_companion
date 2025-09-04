@@ -10,12 +10,13 @@ from sqlalchemy import text
 from datetime import datetime, timezone
 
 import os
+import json # Import json to parse the string
 from ..db import get_db
 from ..models import ChatMessage, Claim, ClaimProgress
 from ..auth_utils import decode_access_token
 from ..sockets import sio
 from ..services.ai import generate_ai_reply_rag, AIAnswer
-from ..rag import RAGService, get_rag_service
+from ..rag import RAGService, get_rag_service, analyse_claim_with_rag # Import analyse_claim_with_rag
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -174,14 +175,16 @@ async def send_message(
     print(f"DEBUG CHAT: Found claim - number: {claim.claim_number}, type: {claim.claim_type}")
         
     attachment_url, attachment_name = None, None
+    saved_files = [] # Initialize saved_files list
     if file:
-        # store file in same storage as claim docs (like in new.tsx)
-        storage_path = f"uploads/claims/{claim_id}/{file.filename}"
+    # Use absolute path in container
+        storage_path = f"/home/app/uploads/claims/{claim_id}/{file.filename}"
         os.makedirs(os.path.dirname(storage_path), exist_ok=True)
         with open(storage_path, "wb") as f:
             f.write(await file.read())
-        attachment_url = f"/static/{storage_path}"   # or your S3/GCS path
+        attachment_url = f"/static/uploads/claims/{claim_id}/{file.filename}"
         attachment_name = file.filename
+        saved_files.append(storage_path)     
         print(f"DEBUG CHAT: Saved file to: {storage_path}")
 
     # Store user's message
@@ -210,7 +213,7 @@ async def send_message(
     )
     print("DEBUG CHAT: Emitted user message via socket")
 
-    # --- RAG retrieval with debug ---
+    # --- RAG retrieval and analysis ---
     print(f"DEBUG RAG: ========== RAG Retrieval ==========")
     print(f"DEBUG RAG: User message: '{message_text}'")
     print(f"DEBUG RAG: Message length: {len(message_text)}")
@@ -218,8 +221,12 @@ async def send_message(
     
     try:
         rag_service = get_rag_service()
+        # Add existing uploaded documents from the claim to the RAG service
         if claim.uploaded_documents:
             rag_service.add_documents(claim.uploaded_documents)
+        # Add any newly uploaded files to the RAG service
+        if saved_files:
+            rag_service.add_documents(saved_files)
 
         print("DEBUG RAG: Calling rag_service.retrieve()...")
         context_chunks: List[Any] = rag_service.retrieve(message_text, top_k=3)
@@ -233,9 +240,20 @@ async def send_message(
         else:
             print("DEBUG RAG: NO CHUNKS RETURNED FROM RAG SERVICE")
             
+        # Call analyse_claim_with_rag to get the structured analysis
+        # Pass the claim_type and description to analyse_claim_with_rag
+        claim_analysis_json_str = analyse_claim_with_rag(
+            claim_type=claim.claim_type,
+            description=claim.incident_description, # Use claim's description for analysis
+            files=saved_files # Pass any newly uploaded files for analysis
+        )
+        claim_analysis_dict = json.loads(claim_analysis_json_str)
+        print(f"DEBUG CHAT: Claim Analysis: {claim_analysis_dict}")
+
     except Exception as e:
         print(f"DEBUG RAG: RAG service error: {type(e).__name__}: {e}")
         context_chunks = []
+        claim_analysis_dict = {} # Ensure it's an empty dict on error
 
     # --- AI generation with grounding & JSON citations ---
     print(f"DEBUG AI: ========== AI Generation ==========")
@@ -243,7 +261,11 @@ async def send_message(
     
     try:
         print("DEBUG AI: Calling generate_ai_reply_rag()...")
-        ai_result: AIAnswer = await generate_ai_reply_rag(claim, message_text, context_chunks)
+        ai_result: AIAnswer = await generate_ai_reply_rag(
+            claim,
+            message_text,
+            context_chunks,
+        )
         ai_text = ai_result.answer
         print(f"DEBUG AI: Generated answer: '{ai_text}'")
         print(f"DEBUG AI: Generated {len(ai_result.citations)} citations")
