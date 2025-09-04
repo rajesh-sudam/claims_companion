@@ -1,0 +1,66 @@
+# docker-compose.yml (Optimized for Development)
+
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    env_file: ./.env # Use variables from .env file
+    ports:
+      - "5432:5432"
+    volumes:
+      - naic-2025_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - claims-net
+
+  backend:
+    build:
+      context: ./backend_py
+      dockerfile: Dockerfile.dev # Use development Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./backend_py/.env
+      - ./.env # Also give backend access to db credentials if needed
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend_py/app:/home/app/app
+      - vectorstore_data:/tmp/chroma_rag_db
+      - uploads_data:/home/app/uploads # Mount for hot-reloading
+    networks:
+      - claims-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev # Use development Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:3000"
+    volumes:
+      - ./frontend:/app # Mount for hot-reloading
+      - /app/node_modules # Preserve container's node_modules
+    networks:
+      - claims-net
+
+volumes:
+  naic-2025_db_data:
+  vectorstore_data:
+  uploads_data:
+
+
+networks:
+  claims-net:
+    driver: bridge
