@@ -1,0 +1,1 @@
+{"c":["pages/_app","pages/claims/[id]","webpack"],"r":["pages/agent/claims/[id]"],"m":["(pages-dir-browser)/./node_modules/next/dist/build/webpack/loaders/next-client-pages-loader.js?absolutePagePath=%2Fapp%2Fsrc%2Fpages%2Fagent%2Fclaims%2F%5Bid%5D.tsx&page=%2Fagent%2Fclaims%2F%5Bid%5D!","(pages-dir-browser)/./src/pages/agent/claims/[id].tsx"]}
